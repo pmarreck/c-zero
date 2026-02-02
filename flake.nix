@@ -22,7 +22,7 @@
 						shellHook = ''
 							unset LD
 							unset SDKROOT
-							export ZIG_GLOBAL_CACHE_DIR="''${ZIG_GLOBAL_CACHE_DIR:-$HOME/.cache/zig}"
+							export ZIG_GLOBAL_CACHE_DIR="$PWD/.zig-global-cache"
 						'';
 					};
 				});
