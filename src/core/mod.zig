@@ -12,7 +12,11 @@ pub const GS = encoding.GS;
 pub const RS = encoding.RS;
 pub const US = encoding.US;
 
+pub const encoder = @import("encoder.zig");
+pub const encode = encoder.encode;
+
 test {
     _ = value;
     _ = encoding;
+    _ = encoder;
 }
