@@ -7,7 +7,6 @@ const enc = @import("encoding.zig");
 
 pub const DecodeError = error{
     UnexpectedEndOfInput,
-    UnexpectedStructuralByte,
     MissingUnitSeparator,
     MissingRecordSeparator,
     TrailingData,
@@ -99,7 +98,6 @@ fn decodeArray(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) Dec
 
         // Expect US after value
         if (pos.* >= bytes.len or bytes[pos.*] != enc.US) {
-            deinitValue(allocator, item);
             return DecodeError.MissingUnitSeparator;
         }
         pos.* += 1; // Consume US
@@ -165,8 +163,6 @@ fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) De
 
         // Expect RS after value
         if (pos.* >= bytes.len or bytes[pos.*] != enc.RS) {
-            if (key.len > 0) allocator.free(key);
-            deinitValue(allocator, val);
             return DecodeError.MissingRecordSeparator;
         }
         pos.* += 1; // Consume RS
@@ -197,9 +193,7 @@ pub fn deinitValue(allocator: std.mem.Allocator, val: Value) void {
             for (arr) |item| {
                 deinitValue(allocator, item);
             }
-            if (arr.len > 0) {
-                allocator.free(arr);
-            }
+            allocator.free(arr);
         },
         .object => |obj| {
             for (obj) |entry| {
@@ -208,9 +202,7 @@ pub fn deinitValue(allocator: std.mem.Allocator, val: Value) void {
                 }
                 deinitValue(allocator, entry.value);
             }
-            if (obj.len > 0) {
-                allocator.free(obj);
-            }
+            allocator.free(obj);
         },
     }
 }
