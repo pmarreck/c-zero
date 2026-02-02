@@ -25,4 +25,5 @@ test {
     _ = encoding;
     _ = encoder;
     _ = decoder;
+    _ = @import("roundtrip_test.zig");
 }
