@@ -96,4 +96,36 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ffi_tests.step);
 
     _ = ffi_mod;
+
+    // JSON demo executable
+    const json_demo = b.addExecutable(.{
+        .name = "json_demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/json_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "c0_core", .module = core_mod },
+            },
+        }),
+    });
+    b.installArtifact(json_demo);
+
+    const run_json_demo = b.addRunArtifact(json_demo);
+    const run_demo_step = b.step("run-json-demo", "Run the JSON demo");
+    run_demo_step.dependOn(&run_json_demo.step);
+
+    // JSON demo tests
+    const json_demo_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/json_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "c0_core", .module = core_mod },
+            },
+        }),
+    });
+    const run_json_demo_tests = b.addRunArtifact(json_demo_tests);
+    test_step.dependOn(&run_json_demo_tests.step);
 }
