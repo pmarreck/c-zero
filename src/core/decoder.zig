@@ -152,7 +152,6 @@ fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) De
 
         // Expect US after key
         if (pos.* >= bytes.len or bytes[pos.*] != enc.US) {
-            if (key.len > 0) allocator.free(key);
             return DecodeError.MissingUnitSeparator;
         }
         pos.* += 1; // Consume US
