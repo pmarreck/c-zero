@@ -6,6 +6,13 @@ pub const value = @import("value.zig");
 pub const Value = value.Value;
 pub const Entry = value.Entry;
 
+pub const encoding = @import("encoding.zig");
+pub const FS = encoding.FS;
+pub const GS = encoding.GS;
+pub const RS = encoding.RS;
+pub const US = encoding.US;
+
 test {
     _ = value;
+    _ = encoding;
 }
