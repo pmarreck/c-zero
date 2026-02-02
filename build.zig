@@ -47,6 +47,23 @@ pub fn build(b: *std.Build) void {
     lib.installHeader(b.path("ffi/c0.h"), "c0.h");
     b.installArtifact(lib);
 
+    // C CLI executable
+    const cli = b.addExecutable(.{
+        .name = "c0",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    cli.addCSourceFile(.{
+        .file = b.path("cli/main.c"),
+        .flags = &.{ "-std=c99", "-Wall", "-Wextra" },
+    });
+    cli.addIncludePath(b.path("ffi"));
+    cli.linkLibrary(lib);
+    b.installArtifact(cli);
+
     // Core tests
     const core_tests = b.addTest(.{
         .root_module = b.createModule(.{
