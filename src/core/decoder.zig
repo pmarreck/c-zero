@@ -104,8 +104,16 @@ fn decodeArray(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) Dec
 
         items.append(allocator, item) catch return DecodeError.OutOfMemory;
 
-        // Check if array ends (next byte is structural or end of input)
-        if (pos.* >= bytes.len or enc.isStructural(bytes[pos.*])) {
+        // Check if array ends:
+        // - End of input: done
+        // - RS: we're inside a parent object, let it handle the RS
+        // - US: parent array's terminator (we're a nested array element)
+        // - GS/FS: next element is a nested container, continue parsing
+        if (pos.* >= bytes.len) {
+            break;
+        }
+        const next_byte = bytes[pos.*];
+        if (next_byte == enc.RS or next_byte == enc.US) {
             break;
         }
     }
@@ -140,10 +148,14 @@ fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) De
     while (pos.* < bytes.len) {
         const next = bytes[pos.*];
 
-        // If we see a structural byte, object ends (shouldn't happen for well-formed input)
-        if (enc.isStructural(next)) {
+        // RS means object is done (we already checked empty object at line 134)
+        if (next == enc.RS) {
+            pos.* += 1; // Consume the RS
             break;
         }
+
+        // FS/GS would be malformed (key must be a string), but let decodeString handle it
+        // US means empty key, which is valid - continue to parse
 
         // Parse key (string until US)
         const key_val = try decodeString(allocator, bytes, pos);
@@ -168,7 +180,10 @@ fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) De
 
         entries.append(allocator, .{ .key = key, .value = val }) catch return DecodeError.OutOfMemory;
 
-        // Check if object ends (next byte is structural or end of input)
+        // After consuming RS, check if object ends:
+        // - End of input: done
+        // - Any structural byte (US from parent array, RS, FS, GS): done
+        // - Non-structural: next entry's key, continue
         if (pos.* >= bytes.len or enc.isStructural(bytes[pos.*])) {
             break;
         }

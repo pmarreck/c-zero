@@ -170,20 +170,16 @@ test "round-trip: object with multiple entries" {
     try roundTrip(allocator, val);
 }
 
-// NOTE: This test documents a decoder bug with empty keys.
-// The object {"": ""} encodes as FS US RS (empty key, US, empty value, RS).
-// The decoder incorrectly treats the US as a structural terminator rather than
-// recognizing it as the separator between an empty key and the value.
-// TODO: Fix decoder to properly handle empty keys in objects
-//
-// test "round-trip: object with empty key and value" {
-//     const allocator = std.testing.allocator;
-//     const entries = [_]Entry{
-//         .{ .key = "", .value = .{ .string = "" } },
-//     };
-//     const val = Value{ .object = &entries };
-//     try roundTrip(allocator, val);
-// }
+// NOTE: Empty keys are valid (the key is just an empty string).
+// This was previously a bug but is now fixed.
+test "round-trip: object with empty key and value" {
+    const allocator = std.testing.allocator;
+    const entries = [_]Entry{
+        .{ .key = "", .value = .{ .string = "" } },
+    };
+    const val = Value{ .object = &entries };
+    try roundTrip(allocator, val);
+}
 
 test "round-trip: object with special bytes in key" {
     const allocator = std.testing.allocator;
@@ -266,38 +262,34 @@ test "round-trip: deeply nested object" {
     try roundTrip(allocator, val);
 }
 
-// NOTE: This test documents a decoder bug with arrays of objects.
-// The structure {"data": [{"items": ["a", "b"]}, {"items": ["c"]}]} fails to decode.
-// After parsing the first inner object's RS, the decoder sees the outer array's US
-// and incorrectly interprets the following FS as a structural terminator.
-// TODO: Fix decoder to properly handle multiple objects in an array
-//
-// test "round-trip: deeply nested mixed structures" {
-//     const allocator = std.testing.allocator;
-//     // {"data": [{"items": ["a", "b"]}, {"items": ["c"]}]}
-//     const items1 = [_]Value{
-//         .{ .string = "a" },
-//         .{ .string = "b" },
-//     };
-//     const items2 = [_]Value{
-//         .{ .string = "c" },
-//     };
-//     const obj1_entries = [_]Entry{
-//         .{ .key = "items", .value = .{ .array = &items1 } },
-//     };
-//     const obj2_entries = [_]Entry{
-//         .{ .key = "items", .value = .{ .array = &items2 } },
-//     };
-//     const arr = [_]Value{
-//         .{ .object = &obj1_entries },
-//         .{ .object = &obj2_entries },
-//     };
-//     const entries = [_]Entry{
-//         .{ .key = "data", .value = .{ .array = &arr } },
-//     };
-//     const val = Value{ .object = &entries };
-//     try roundTrip(allocator, val);
-// }
+// NOTE: This test was previously failing due to a decoder bug with arrays of objects.
+// Fix: decoder only breaks array parsing on RS/US, not on GS/FS (which start nested containers).
+test "round-trip: deeply nested mixed structures" {
+    const allocator = std.testing.allocator;
+    // {"data": [{"items": ["a", "b"]}, {"items": ["c"]}]}
+    const items1 = [_]Value{
+        .{ .string = "a" },
+        .{ .string = "b" },
+    };
+    const items2 = [_]Value{
+        .{ .string = "c" },
+    };
+    const obj1_entries = [_]Entry{
+        .{ .key = "items", .value = .{ .array = &items1 } },
+    };
+    const obj2_entries = [_]Entry{
+        .{ .key = "items", .value = .{ .array = &items2 } },
+    };
+    const arr = [_]Value{
+        .{ .object = &obj1_entries },
+        .{ .object = &obj2_entries },
+    };
+    const entries = [_]Entry{
+        .{ .key = "data", .value = .{ .array = &arr } },
+    };
+    const val = Value{ .object = &entries };
+    try roundTrip(allocator, val);
+}
 
 test "round-trip: complex structure with special bytes throughout" {
     const allocator = std.testing.allocator;
@@ -322,22 +314,18 @@ test "round-trip: complex structure with special bytes throughout" {
 // Edge Case Round-Trip Tests
 // =============================================================================
 
-// NOTE: This test documents a decoder bug with nested empty arrays.
-// The structure [[], [], []] encodes as GS GS US US GS US US GS US US.
-// The decoder has issues parsing consecutive empty containers due to
-// how it handles structural bytes in nested contexts.
-// TODO: Fix decoder to properly handle arrays of empty arrays
-//
-// test "round-trip: array of empty arrays" {
-//     const allocator = std.testing.allocator;
-//     const items = [_]Value{
-//         .{ .array = &.{} },
-//         .{ .array = &.{} },
-//         .{ .array = &.{} },
-//     };
-//     const val = Value{ .array = &items };
-//     try roundTrip(allocator, val);
-// }
+// NOTE: This test was previously failing due to a decoder bug with nested empty arrays.
+// Fix: decoder only breaks array parsing on RS/US, not on GS/FS (which start nested containers).
+test "round-trip: array of empty arrays" {
+    const allocator = std.testing.allocator;
+    const items = [_]Value{
+        .{ .array = &.{} },
+        .{ .array = &.{} },
+        .{ .array = &.{} },
+    };
+    const val = Value{ .array = &items };
+    try roundTrip(allocator, val);
+}
 
 test "round-trip: object with array and object values" {
     const allocator = std.testing.allocator;
