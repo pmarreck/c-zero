@@ -2,6 +2,10 @@
 //!
 //! This module provides the pure encoding/decoding logic with no I/O.
 
-test "stub" {
-    // Placeholder to verify build works
+pub const value = @import("value.zig");
+pub const Value = value.Value;
+pub const Entry = value.Entry;
+
+test {
+    _ = value;
 }
