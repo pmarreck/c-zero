@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+if [[ -z "${C0_NIX:-}" ]]; then
+	exec env C0_NIX=1 nix develop -c "$0" "$@"
+fi
+
+set -euo pipefail
+
+unset LD
+unset SDKROOT
+
+# Ensure Zig has a writable cache directory (override Nix sandbox path)
+ZIG_CACHE="$HOME/.cache/zig"
+mkdir -p "$ZIG_CACHE"
+
+echo "=== Building C0 ==="
+zig build -Doptimize=ReleaseFast --global-cache-dir "$ZIG_CACHE" "$@"
+echo "=== Build complete ==="

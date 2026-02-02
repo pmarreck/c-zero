@@ -1,0 +1,12 @@
+.{
+	.fingerprint = 0x29d01a37fdae6d0f,
+	.name = .c0,
+	.version = "0.1.0",
+	.dependencies = .{
+		.printable_binary = .{
+			.url = "git+https://github.com/pmarreck/printable-binary#HEAD",
+			.hash = "printable_binary-1.0.0-SdPiygFoFADGj1-vsZRYFgoVTubl5JylpHgsPfVQvYT9",
+		},
+	},
+	.paths = .{""},
+}

@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+if [[ -z "${C0_NIX:-}" ]]; then
+	exec env C0_NIX=1 nix develop -c "$0" "$@"
+fi
+
+set -euo pipefail
+
+# Define glob function for noglob environments
+if [[ "$(type -t glob 2>/dev/null)" != "function" ]]; then
+	glob() {
+		local noglob_was_set=false
+		[[ $- == *f* ]] && noglob_was_set=true
+		set +f
+		local expanded=($@)
+		$noglob_was_set && set -f
+		printf '%s\n' "${expanded[@]}"
+	}
+fi
+
+unset LD
+unset SDKROOT
+
+# Ensure Zig has a writable cache directory (override Nix sandbox path)
+ZIG_CACHE="$HOME/.cache/zig"
+mkdir -p "$ZIG_CACHE"
+
+total_failures=0
+
+echo "=== Running Zig tests ==="
+set +e
+zig_output=$(zig build test --summary all --global-cache-dir "$ZIG_CACHE" 2>&1)
+zig_exit=$?
+set -e
+
+printf '%s\n' "$zig_output"
+
+if [[ $zig_exit -ne 0 ]]; then
+	zig_failures=$(printf '%s\n' "$zig_output" | grep -oE '[0-9]+ failed' | awk '{sum+=$1} END {print sum+0}')
+	if [[ $zig_failures -eq 0 ]]; then
+		zig_failures=1
+	fi
+	echo "=== Zig tests FAILED ($zig_failures failures) ==="
+	total_failures=$((total_failures + zig_failures))
+else
+	echo "=== Zig tests passed ==="
+fi
+
+if [[ -d tests/cli ]]; then
+	echo "=== Building CLI for tests ==="
+	zig build -Doptimize=ReleaseFast --global-cache-dir "$ZIG_CACHE"
+
+	echo "=== Running CLI tests ==="
+	cli_failures=0
+	cli_tests_found=0
+	set +e
+	for test in $(glob tests/cli/*); do
+		if [[ -x "$test" ]]; then
+			((cli_tests_found++))
+			bash "$test"
+			rc=$?
+			cli_failures=$((cli_failures + rc))
+		fi
+	done
+	set -e
+
+	if [[ $cli_tests_found -gt 0 ]]; then
+		if [[ $cli_failures -ne 0 ]]; then
+			echo "=== CLI tests FAILED ($cli_failures failures) ==="
+			total_failures=$((total_failures + cli_failures))
+		else
+			echo "=== CLI tests passed ==="
+		fi
+	fi
+fi
+
+if [[ $total_failures -ne 0 ]]; then
+	echo "=== TOTAL FAILURES: $total_failures ==="
+	exit $total_failures
+fi
+
+echo "=== All tests passed ==="
+exit 0
