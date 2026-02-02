@@ -15,8 +15,14 @@ pub const US = encoding.US;
 pub const encoder = @import("encoder.zig");
 pub const encode = encoder.encode;
 
+pub const decoder = @import("decoder.zig");
+pub const decode = decoder.decode;
+pub const deinit = decoder.deinitValue;
+pub const DecodeError = decoder.DecodeError;
+
 test {
     _ = value;
     _ = encoding;
     _ = encoder;
+    _ = decoder;
 }
