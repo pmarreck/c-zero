@@ -138,9 +138,10 @@ pub fn decodePayloadSmart(allocator: std.mem.Allocator, data: []const u8, option
 }
 
 /// Encode a string payload using printable_binary (always encodes)
+/// Spaces pass through unchanged by default
 /// Caller owns returned slice
 pub fn encodePayload(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
-    return pb.encode(allocator, data, .{});
+    return pb.encode(allocator, data, .{ .spaces = true });
 }
 
 /// Decode a string payload using printable_binary (always decodes)
