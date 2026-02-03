@@ -5,14 +5,40 @@ const Value = @import("value.zig").Value;
 const Entry = @import("value.zig").Entry;
 const enc = @import("encoding.zig");
 
-/// Encode a Value to C0 binary format
-/// Applies printable_binary encoding to payloads
+/// Options for C0 encoding
+pub const EncodeOptions = struct {
+    /// Allow literal spaces in payloads (don't force encoding for spaces)
+    allow_spaces: bool = false,
+    /// Allow literal tabs in payloads (don't force encoding for tabs)
+    allow_tabs: bool = false,
+};
+
+/// Encode mode for internal use
+const EncodeMode = union(enum) {
+    /// Smart encoding with options
+    smart: enc.EncodePayloadOptions,
+    /// Raw mode - no payload encoding
+    raw: void,
+};
+
+/// Encode a Value to C0 binary format using smart encoding
+/// Only applies printable_binary encoding when needed (avoids double-encoding)
 /// Caller owns returned slice and must free with same allocator
 pub fn encode(allocator: std.mem.Allocator, val: Value) ![]u8 {
+    return encodeWithOptions(allocator, val, .{});
+}
+
+/// Encode a Value to C0 binary format with options
+/// Caller owns returned slice and must free with same allocator
+pub fn encodeWithOptions(allocator: std.mem.Allocator, val: Value, options: EncodeOptions) ![]u8 {
     var result: std.ArrayListUnmanaged(u8) = .{};
     errdefer result.deinit(allocator);
 
-    try encodeValue(allocator, &result, val, true);
+    const mode = EncodeMode{ .smart = .{
+        .allow_spaces = options.allow_spaces,
+        .allow_tabs = options.allow_tabs,
+    } };
+    try encodeValue(allocator, &result, val, mode);
 
     return result.toOwnedSlice(allocator);
 }
@@ -24,26 +50,29 @@ pub fn encodeRaw(allocator: std.mem.Allocator, val: Value) ![]u8 {
     var result: std.ArrayListUnmanaged(u8) = .{};
     errdefer result.deinit(allocator);
 
-    try encodeValue(allocator, &result, val, false);
+    try encodeValue(allocator, &result, val, .raw);
 
     return result.toOwnedSlice(allocator);
 }
 
-fn encodeValue(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), val: Value, encode_payloads: bool) !void {
+fn encodeValue(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), val: Value, mode: EncodeMode) !void {
     switch (val) {
         .string => |s| {
-            if (encode_payloads) {
-                const encoded = try enc.encodePayload(allocator, s);
-                defer allocator.free(encoded);
-                try out.appendSlice(allocator, encoded);
-            } else {
-                try out.appendSlice(allocator, s);
+            switch (mode) {
+                .smart => |opts| {
+                    const encoded = try enc.encodePayloadSmart(allocator, s, opts);
+                    defer allocator.free(encoded);
+                    try out.appendSlice(allocator, encoded);
+                },
+                .raw => {
+                    try out.appendSlice(allocator, s);
+                },
             }
         },
         .array => |arr| {
             try out.append(allocator, enc.GS);
             for (arr) |item| {
-                try encodeValue(allocator, out, item, encode_payloads);
+                try encodeValue(allocator, out, item, mode);
                 try out.append(allocator, enc.US);
             }
             // Empty array still needs trailing US (spec: GS US)
@@ -55,16 +84,19 @@ fn encodeValue(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), v
             try out.append(allocator, enc.FS);
             for (obj) |entry| {
                 // Key
-                if (encode_payloads) {
-                    const key_encoded = try enc.encodePayload(allocator, entry.key);
-                    defer allocator.free(key_encoded);
-                    try out.appendSlice(allocator, key_encoded);
-                } else {
-                    try out.appendSlice(allocator, entry.key);
+                switch (mode) {
+                    .smart => |opts| {
+                        const key_encoded = try enc.encodePayloadSmart(allocator, entry.key, opts);
+                        defer allocator.free(key_encoded);
+                        try out.appendSlice(allocator, key_encoded);
+                    },
+                    .raw => {
+                        try out.appendSlice(allocator, entry.key);
+                    },
                 }
                 try out.append(allocator, enc.US);
                 // Value
-                try encodeValue(allocator, out, entry.value, encode_payloads);
+                try encodeValue(allocator, out, entry.value, mode);
                 try out.append(allocator, enc.RS);
             }
             // Empty object still needs trailing RS (spec: FS RS)
@@ -104,7 +136,7 @@ test "encode empty array" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // Empty array = GS US
+    // Empty array = GS US = "[:"
     try std.testing.expectEqual(@as(usize, 2), result.len);
     try std.testing.expectEqual(enc.GS, result[0]);
     try std.testing.expectEqual(enc.US, result[1]);
@@ -121,7 +153,7 @@ test "encode array with strings" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // GS "a" US "b" US
+    // GS "a" US "b" US = "[a:b:" = 5 bytes
     try std.testing.expectEqual(@as(usize, 5), result.len);
     try std.testing.expectEqual(enc.GS, result[0]);
     try std.testing.expectEqual(@as(u8, 'a'), result[1]);
@@ -137,7 +169,7 @@ test "encode empty object" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // Empty object = FS RS
+    // Empty object = FS RS = "{,"
     try std.testing.expectEqual(@as(usize, 2), result.len);
     try std.testing.expectEqual(enc.FS, result[0]);
     try std.testing.expectEqual(enc.RS, result[1]);
@@ -153,7 +185,7 @@ test "encode object with entry" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // FS "k" US "v" RS
+    // FS "k" US "v" RS = "{k:v," = 5 bytes
     try std.testing.expectEqual(@as(usize, 5), result.len);
     try std.testing.expectEqual(enc.FS, result[0]);
     try std.testing.expectEqual(@as(u8, 'k'), result[1]);
@@ -175,10 +207,10 @@ test "encode nested structure" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // FS "arr" US GS "x" US RS
+    // FS "arr" US GS "x" US RS = "{arr:[x:," = 9 bytes
     try std.testing.expectEqual(@as(usize, 9), result.len);
     try std.testing.expectEqual(enc.FS, result[0]);
-    // "arr" = bytes 1,2,3
+    try std.testing.expectEqualStrings("arr", result[1..4]);
     try std.testing.expectEqual(enc.US, result[4]);
     try std.testing.expectEqual(enc.GS, result[5]);
     try std.testing.expectEqual(@as(u8, 'x'), result[6]);

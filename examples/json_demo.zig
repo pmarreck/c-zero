@@ -81,24 +81,21 @@ pub fn main() !void {
 
     try stdout.print("2. C0 encoded ({d} bytes):\n", .{c0_encoded.len});
 
-    // Print C0 bytes in a readable format
+    // Print C0 bytes - delimiters are now visible ASCII: { [ , :
+    // so we can just print the output directly!
     for (c0_encoded, 0..) |b, i| {
         if (b < 0x20) {
-            const names = [_][]const u8{
-                "NUL", "SOH", "STX", "ETX", "EOT", "ENQ", "ACK", "BEL",
-                "BS",  "HT",  "LF",  "VT",  "FF",  "CR",  "SO",  "SI",
-                "DLE", "DC1", "DC2", "DC3", "DC4", "NAK", "SYN", "ETB",
-                "CAN", "EM",  "SUB", "ESC", "FS",  "GS",  "RS",  "US",
-            };
-            try stdout.print("[{s}]", .{names[b]});
+            // Control characters in payload data (rare, from printable_binary)
+            try stdout.print("\\x{x:0>2}", .{b});
         } else if (b < 0x7F) {
             try stdout.print("{c}", .{b});
         } else {
+            // High bytes (UTF-8 or printable_binary encoded)
             try stdout.print("\\x{x:0>2}", .{b});
         }
 
-        // Line break every 70 chars for readability
-        if ((i + 1) % 70 == 0) {
+        // Line break every 80 chars for readability
+        if ((i + 1) % 80 == 0) {
             try stdout.print("\n", .{});
         }
     }

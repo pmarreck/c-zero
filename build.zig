@@ -128,4 +128,36 @@ pub fn build(b: *std.Build) void {
     });
     const run_json_demo_tests = b.addRunArtifact(json_demo_tests);
     test_step.dependOn(&run_json_demo_tests.step);
+
+    // Binary demo executable
+    const binary_demo = b.addExecutable(.{
+        .name = "binary_demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/binary_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "c0_core", .module = core_mod },
+            },
+        }),
+    });
+    b.installArtifact(binary_demo);
+
+    const run_binary_demo = b.addRunArtifact(binary_demo);
+    const run_binary_demo_step = b.step("run-binary-demo", "Run the binary data demo");
+    run_binary_demo_step.dependOn(&run_binary_demo.step);
+
+    // Binary demo tests
+    const binary_demo_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/binary_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "c0_core", .module = core_mod },
+            },
+        }),
+    });
+    const run_binary_demo_tests = b.addRunArtifact(binary_demo_tests);
+    test_step.dependOn(&run_binary_demo_tests.step);
 }

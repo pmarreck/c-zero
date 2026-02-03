@@ -13,11 +13,24 @@ pub const DecodeError = error{
     OutOfMemory,
 };
 
+/// Options for C0 decoding
+pub const DecodeOptions = struct {
+    /// If true, keep printable-binary encoded data as-is (don't decode)
+    /// Useful for JSON output where we want readable strings
+    keep_printable: bool = false,
+};
+
 /// Decode C0 binary to a Value
 /// Caller owns returned Value and all nested allocations
 pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) DecodeError!Value {
+    return decodeWithOptions(allocator, bytes, .{});
+}
+
+/// Decode C0 binary to a Value with options
+/// Caller owns returned Value and all nested allocations
+pub fn decodeWithOptions(allocator: std.mem.Allocator, bytes: []const u8, options: DecodeOptions) DecodeError!Value {
     var pos: usize = 0;
-    const result = try decodeValue(allocator, bytes, &pos);
+    const result = try decodeValueInternal(allocator, bytes, &pos, options);
 
     // Ensure we consumed all input
     if (pos != bytes.len) {
@@ -28,7 +41,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) DecodeError!Value
     return result;
 }
 
-fn decodeValue(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) DecodeError!Value {
+fn decodeValueInternal(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize, options: DecodeOptions) DecodeError!Value {
     if (pos.* >= bytes.len) {
         // Empty input = empty string
         return Value{ .string = "" };
@@ -37,15 +50,15 @@ fn decodeValue(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) Dec
     const first = bytes[pos.*];
 
     if (first == enc.GS) {
-        return decodeArray(allocator, bytes, pos);
+        return decodeArrayInternal(allocator, bytes, pos, options);
     } else if (first == enc.FS) {
-        return decodeObject(allocator, bytes, pos);
+        return decodeObjectInternal(allocator, bytes, pos, options);
     } else {
-        return decodeString(allocator, bytes, pos);
+        return decodeStringInternal(allocator, bytes, pos, options);
     }
 }
 
-fn decodeString(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) DecodeError!Value {
+fn decodeStringInternal(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize, options: DecodeOptions) DecodeError!Value {
     const start = pos.*;
 
     // Read until structural byte or end
@@ -55,15 +68,26 @@ fn decodeString(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) De
 
     const encoded_payload = bytes[start..pos.*];
 
-    // Decode the payload
-    const decoded = enc.decodePayload(allocator, encoded_payload) catch |err| switch (err) {
+    // Decode the payload using smart decoding
+    const decoded = enc.decodePayloadSmart(allocator, encoded_payload, .{
+        .keep_printable = options.keep_printable,
+    }) catch |err| switch (err) {
         error.OutOfMemory => return DecodeError.OutOfMemory,
     };
 
     return Value{ .string = decoded };
 }
 
-fn decodeArray(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) DecodeError!Value {
+// Legacy internal functions that call the new ones with default options
+fn decodeValue(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) DecodeError!Value {
+    return decodeValueInternal(allocator, bytes, pos, .{});
+}
+
+fn decodeString(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) DecodeError!Value {
+    return decodeStringInternal(allocator, bytes, pos, .{});
+}
+
+fn decodeArrayInternal(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize, options: DecodeOptions) DecodeError!Value {
     // Consume GS
     std.debug.assert(bytes[pos.*] == enc.GS);
     pos.* += 1;
@@ -93,7 +117,7 @@ fn decodeArray(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) Dec
         }
 
         // Parse value (handles GS/FS for nested containers, or string otherwise)
-        const item = try decodeValue(allocator, bytes, pos);
+        const item = try decodeValueInternal(allocator, bytes, pos, options);
         errdefer deinitValue(allocator, item);
 
         // Expect US after value
@@ -122,7 +146,7 @@ fn decodeArray(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) Dec
     return Value{ .array = slice };
 }
 
-fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) DecodeError!Value {
+fn decodeObjectInternal(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize, options: DecodeOptions) DecodeError!Value {
     // Consume FS
     std.debug.assert(bytes[pos.*] == enc.FS);
     pos.* += 1;
@@ -148,7 +172,7 @@ fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) De
     while (pos.* < bytes.len) {
         const next = bytes[pos.*];
 
-        // RS means object is done (we already checked empty object at line 134)
+        // RS means object is done (we already checked empty object above)
         if (next == enc.RS) {
             pos.* += 1; // Consume the RS
             break;
@@ -158,7 +182,7 @@ fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) De
         // US means empty key, which is valid - continue to parse
 
         // Parse key (string until US)
-        const key_val = try decodeString(allocator, bytes, pos);
+        const key_val = try decodeStringInternal(allocator, bytes, pos, options);
         const key = key_val.string;
         errdefer if (key.len > 0) allocator.free(key);
 
@@ -169,7 +193,7 @@ fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) De
         pos.* += 1; // Consume US
 
         // Parse value
-        const val = try decodeValue(allocator, bytes, pos);
+        const val = try decodeValueInternal(allocator, bytes, pos, options);
         errdefer deinitValue(allocator, val);
 
         // Expect RS after value
@@ -191,6 +215,15 @@ fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) De
 
     const slice = entries.toOwnedSlice(allocator) catch return DecodeError.OutOfMemory;
     return Value{ .object = slice };
+}
+
+// Legacy wrappers for backwards compatibility
+fn decodeArray(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) DecodeError!Value {
+    return decodeArrayInternal(allocator, bytes, pos, .{});
+}
+
+fn decodeObject(allocator: std.mem.Allocator, bytes: []const u8, pos: *usize) DecodeError!Value {
+    return decodeObjectInternal(allocator, bytes, pos, .{});
 }
 
 /// Free a Value and all nested allocations
@@ -251,7 +284,7 @@ test "decode empty array" {
 
 test "decode array with strings" {
     const allocator = std.testing.allocator;
-    // GS "a" US "b" US
+    // GS "a" US "b" US = "[a:b:"
     const input = [_]u8{ enc.GS, 'a', enc.US, 'b', enc.US };
     const result = try decode(allocator, &input);
     defer deinitValue(allocator, result);
@@ -274,7 +307,7 @@ test "decode empty object" {
 
 test "decode object with entry" {
     const allocator = std.testing.allocator;
-    // FS "k" US "v" RS
+    // FS "k" US "v" RS = "{k:v,"
     const input = [_]u8{ enc.FS, 'k', enc.US, 'v', enc.RS };
     const result = try decode(allocator, &input);
     defer deinitValue(allocator, result);
@@ -287,7 +320,7 @@ test "decode object with entry" {
 
 test "decode nested structure" {
     const allocator = std.testing.allocator;
-    // { "arr": ["x"] } = FS "arr" US GS "x" US RS
+    // { "arr": ["x"] } = FS "arr" US GS "x" US RS = "{arr:[x:,"
     const input = [_]u8{ enc.FS, 'a', 'r', 'r', enc.US, enc.GS, 'x', enc.US, enc.RS };
     const result = try decode(allocator, &input);
     defer deinitValue(allocator, result);
@@ -304,7 +337,7 @@ test "decode nested structure" {
 
 test "trailing data error" {
     const allocator = std.testing.allocator;
-    // Valid object followed by garbage
+    // Valid object followed by garbage = "{,x"
     const input = [_]u8{ enc.FS, enc.RS, 'x' };
 
     const result = decode(allocator, &input);
