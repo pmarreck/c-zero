@@ -4,6 +4,14 @@ A hierarchical binary data stream format designed for human-readable UTF-8 envir
 
 C0 builds on [**printable-binary**](https://github.com/pmarreck/printable-binary), a separate encoding that transforms arbitrary bytes into readable UTF-8 glyphs. While printable-binary handles the byte-to-glyph mapping, C0 adds hierarchical structure (arrays and objects) on top.
 
+**C0 is format-agnostic.** It doesn't care what your binary data represents - it merely provides a human-readable, editor-compatible, terminal-friendly representation of structured data containing arbitrary binary values. Your data could be images, executables, network packets, or anything else. C0 just makes it visible and organizable.
+
+### Why "C0"?
+
+The name "C0" is a historical nod to the [C0 control codes](https://en.wikipedia.org/wiki/C0_and_C1_control_codes) (bytes 0x00-0x1F in ASCII), which include characters like File Separator (FS), Group Separator (GS), Record Separator (RS), and Unit Separator (US). Early versions of this format actually used these control codes as structural delimiters.
+
+However, raw control codes cause problems: they're invisible in editors, break terminal output, and can't be safely copy-pasted. So we switched to printable ASCII delimiters (`{`, `[`, `,`, `:`) that printable-binary escapes when they appear in data. The name stuck as a reminder of the format's origins and its purpose: structured data with clear separation.
+
 ## Why C0?
 
 **C0 solves the "binary in text" problem differently:**
@@ -152,10 +160,92 @@ The "PNG" and "Hello from binary!" parts remain readable (spaces included!), whi
 ## Demos
 
 ### JSON Demo
-Shows bidirectional JSON ↔ C0 conversion with all JSON types preserved:
+
+The JSON demo shows bidirectional JSON ↔ C0 conversion. **Note:** JSON itself cannot contain raw binary data (it requires encoding like base64), so this demo is somewhat limiting compared to C0's full capabilities. However, it's included to demonstrate C0 and printable-binary in a relatable way, and to show how embedded JSON can avoid "escaping hell."
+
 ```bash
 zig build run-json-demo
 ```
+
+Full output:
+```
+=== Full JSON <-> C0 Demo (Type-Preserving) ===
+
+1. Input JSON (615 bytes):
+{
+  "project": "c0",
+  "description": "A human-readable binary format with spaces preserved!",
+  "version": "0.1.0",
+  "stable": false,
+  "downloads": 42,
+  "rating": 4.5,
+  "deprecated": null,
+  "keywords": ["binary", "format", "streaming", "human readable"],
+  "empty_string_test": "",
+  "empty_array_test": [],
+  "config": {
+    "debug": true,
+    "timeout_ms": 30000,
+    "ratio": 1.5e-3,
+    "message": "Hello, World! Spaces are preserved.",
+    "features": {
+      "escaping": false,
+      "utf8": true,
+      "nested_arrays": [[1, 2], [3, 4]],
+      "mixed": [null, true, "text with spaces", -42]
+    }
+  }
+}
+
+2. C0 encoded (445 bytes):
+{project:"c0,description:"A human˗readable binary format with spaces preservedǃ,version:"0.1.0,stable:false,downloads:42,rating:4.5,deprecated:null,keywords:["binary:"format:"streaming:"human readable:,empty_string_test:",empty_array_test:[:,config:{debug:true,timeout_ms:30000,ratio:1.5e-3,message:"Hello٫ Worldǃ Spaces are preserved.,features:{escaping:false,utf8:true,nested_arrays:[[1:2::[3:4::,mixed:[null:true:"text with spaces:-42:,,,
+
+3. Decoded back to JSON (537 bytes):
+{"project": "c0", "description": "A human-readable binary format with spaces preserved!", ...}
+
+4. Type verification:
+object{11 keys}:
+  "project": "c0"
+  "description": "A human-readabl"
+  "version": "0.1.0"
+  "stable": false
+  "downloads": 42
+  ... and 6 more keys
+
+=== Size: JSON 615 bytes -> C0 445 bytes (72.4%) ===
+
+=== Bonus: Printable-Binary Encoding Demo ===
+
+5. Raw binary (23 bytes):
+   \x89PNG\x0d\x0a\x1a\x0a\x00\x01\x02\x03Hello\x00World
+
+6. Printable-binary encoded (34 bytes):
+   ɃPNG⏎¶Ƶ¶·¯«»Hello·World
+
+7. Embedding binary in JSON via C0:
+   C0 output (95 bytes):
+   {png_header:ɃPNG⏎¶Ƶ¶·¯«»Hello·World,description:PNG file with null bytes embeddedǃ,
+
+   Note: The binary data remains readable as printable-binary glyphs!
+   'PNG' is visible, control bytes become distinct Unicode characters.
+
+8. Embedded JSON - The Antidote to Escaping Hell:
+
+   TRADITIONAL JSON (escaping hell):
+   {"data": "{\"inner\": [1, 2, 3], \"nested\": true}"}
+
+   WITH PRINTABLE-BINARY (no escaping needed!):
+   {"data": "❴˵inner˵꞉ ⟦1٫ 2٫ 3⟧٫ ˵nested˵꞉ true❵"}
+
+   The pb-encoded JSON uses different Unicode delimiters:
+     { -> ❴    [ -> ⟦    , -> ٫    : -> ꞉    " -> ˵
+   So you can embed it directly in a JSON string without backslash escaping!
+
+   Round-trip proof - decode the pb-encoded JSON:
+   Decoded: {"inner": [1, 2, 3], "nested": true}
+```
+
+Notice how the C0 output remains readable: `human˗readable`, `Hello٫ Worldǃ`, with real spaces preserved. The hyphens, commas, and exclamation marks in string content become distinctive Unicode glyphs (`˗`, `٫`, `ǃ`) while the structural delimiters (`{`, `[`, `,`, `:`) remain as ASCII.
 
 ### Binary Demo
 Shows C0 as a container for arbitrary binary data:
