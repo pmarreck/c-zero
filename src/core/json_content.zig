@@ -556,18 +556,19 @@ pub fn toC0ValueWithOptions(allocator: std.mem.Allocator, json: JsonValue, optio
 }
 
 pub const FromC0Options = struct {
-    /// Decode string content with printable_binary (default: true)
-    /// Set to false to get raw content (e.g., if storing pre-encoded data)
-    decode_strings: bool = true,
-    /// Decode keys with printable_binary (default: true)
-    /// Set to false to get raw keys
-    decode_keys: bool = true,
+    /// Decode string content with printable_binary (default: false)
+    /// JSON strings may contain intentionally pb-encoded content that should stay as-is
+    decode_strings: bool = false,
+    /// Decode keys with printable_binary (default: false)
+    /// Keys are typically plain ASCII identifiers
+    decode_keys: bool = false,
 };
 
 /// Convert C0 Value to JsonValue (for decoding)
-/// - Strings: strip '"' marker, decode content with printable_binary
+/// - Strings: strip '"' marker, keep content as-is (pb glyphs preserved)
 /// - Numbers/booleans/null: parse as-is
-/// - Keys: decode with printable_binary
+/// - Keys: keep as-is (no decoding)
+/// Note: pb-encoded content in strings is preserved, not decoded
 pub fn fromC0Value(allocator: std.mem.Allocator, val: Value) !JsonValue {
     return fromC0ValueWithOptions(allocator, val, .{});
 }
