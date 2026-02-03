@@ -43,7 +43,7 @@ pub fn main() !void {
     const json_input =
         \\{
         \\  "project": "c0",
-        \\  "description": "A human-readable binary format with spaces preserved!",
+        \\  "description": "A human-readable binary format!",
         \\  "version": "0.1.0",
         \\  "stable": false,
         \\  "downloads": 42,
@@ -56,7 +56,7 @@ pub fn main() !void {
         \\    "debug": true,
         \\    "timeout_ms": 30000,
         \\    "ratio": 1.5e-3,
-        \\    "message": "Hello, World! Spaces are preserved.",
+        \\    "message": "Hello, World!",
         \\    "features": {
         \\      "escaping": false,
         \\      "utf8": true,
@@ -406,7 +406,7 @@ test "JSON -> C0 -> JSON full round-trip structural equivalence" {
     const input =
         \\{
         \\  "project": "c0",
-        \\  "description": "A human-readable binary format with spaces preserved!",
+        \\  "description": "A human-readable binary format!",
         \\  "version": "0.1.0",
         \\  "stable": false,
         \\  "downloads": 42,
@@ -420,7 +420,7 @@ test "JSON -> C0 -> JSON full round-trip structural equivalence" {
         \\    "debug": true,
         \\    "timeout_ms": 30000,
         \\    "ratio": 1.5e-3,
-        \\    "message": "Hello, World! Spaces are preserved.",
+        \\    "message": "Hello, World!",
         \\    "features": {
         \\      "escaping": false,
         \\      "utf8": true,

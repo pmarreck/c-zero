@@ -20,7 +20,7 @@ However, raw control codes cause problems: they're invisible in editors, break t
 |----------|-------------|-------------|---------------|
 | JSON + Base64 | Encoded to ASCII gibberish | Poor | ~33% |
 | MessagePack | Raw binary | None (binary format) | Minimal |
-| C0 | Encoded to readable UTF-8 | Good - ASCII/spaces preserved | ~5-40%* |
+| C0 | Encoded to readable UTF-8 | Good - ASCII text stays readable | ~5-40%* |
 
 *Text-heavy data can be smaller than base64; pure binary has higher overhead
 
@@ -31,12 +31,12 @@ JSON:     {"data": "SGVsbG8sIFdvcmxkIQABAg=="}  (base64 - unreadable)
 C0:       {data:Hello٫ Worldǃ·¯«,              (readable!)
 ```
 
-The ASCII text "Hello, World!" remains visible in C0 output (including spaces!), while special bytes become recognizable Unicode glyphs. Only the comma and exclamation mark are encoded (`٫` and `ǃ`) because they're structural delimiters.
+The ASCII text "Hello, World!" remains visible in C0 output, while special bytes become recognizable Unicode glyphs. Only the comma and exclamation mark are encoded (`٫` and `ǃ`) because they're structural delimiters.
 
 ## Features
 
-- **Human-readable binary** - ASCII text (including spaces) stays readable; binary becomes recognizable glyphs
-- **Space-efficient** - Spaces pass through unchanged, often beating base64 for text-heavy data
+- **Human-readable binary** - ASCII text stays readable; binary becomes recognizable glyphs
+- **Space-efficient** - Often smaller than base64 for text-heavy data
 - **No escaping needed** - Structural delimiters never appear in payloads (printable_binary encoding)
 - **Streaming-safe** - Parse in a single left-to-right pass without backtracking
 - **UTF-8 native** - Output is always valid UTF-8
@@ -122,7 +122,7 @@ C0 uses intelligent encoding to avoid double-encoding:
 - Data that doesn't need encoding (no structural bytes, valid UTF-8) passes through unchanged
 - Data that's already printable_binary encoded is detected and not re-encoded
 - Only data requiring encoding (contains structural bytes, control chars, or invalid UTF-8) gets encoded
-- **Spaces pass through by default** for readability and smaller output (configurable)
+- Space encoding is configurable (disabled by default for readability)
 
 ### Examples
 
@@ -147,7 +147,7 @@ Input:  \x89PNG\r\n + "Hello from binary!"
 Output: ɃPNG⏎¶Hello from binaryǃ
 ```
 
-The "PNG" and "Hello from binary!" parts remain readable (spaces included!), while control bytes become distinctive glyphs.
+The "PNG" and "Hello from binary!" parts remain readable, while control bytes become distinctive glyphs.
 
 ## Use Cases
 
@@ -171,10 +171,10 @@ Full output:
 ```
 === Full JSON <-> C0 Demo (Type-Preserving) ===
 
-1. Input JSON (615 bytes):
+1. Input JSON (571 bytes):
 {
   "project": "c0",
-  "description": "A human-readable binary format with spaces preserved!",
+  "description": "A human-readable binary format!",
   "version": "0.1.0",
   "stable": false,
   "downloads": 42,
@@ -187,7 +187,7 @@ Full output:
     "debug": true,
     "timeout_ms": 30000,
     "ratio": 1.5e-3,
-    "message": "Hello, World! Spaces are preserved.",
+    "message": "Hello, World!",
     "features": {
       "escaping": false,
       "utf8": true,
@@ -197,11 +197,11 @@ Full output:
   }
 }
 
-2. C0 encoded (445 bytes):
-{project:"c0,description:"A human˗readable binary format with spaces preservedǃ,version:"0.1.0,stable:false,downloads:42,rating:4.5,deprecated:null,keywords:["binary:"format:"streaming:"human readable:,empty_string_test:",empty_array_test:[:,config:{debug:true,timeout_ms:30000,ratio:1.5e-3,message:"Hello٫ Worldǃ Spaces are preserved.,features:{escaping:false,utf8:true,nested_arrays:[[1:2::[3:4::,mixed:[null:true:"text with spaces:-42:,,,
+2. C0 encoded (401 bytes):
+{project:"c0,description:"A human˗readable binary formatǃ,version:"0.1.0,stable:false,downloads:42,rating:4.5,deprecated:null,keywords:["binary:"format:"streaming:"human readable:,empty_string_test:",empty_array_test:[:,config:{debug:true,timeout_ms:30000,ratio:1.5e-3,message:"Hello٫ Worldǃ,features:{escaping:false,utf8:true,nested_arrays:[[1:2::[3:4::,mixed:[null:true:"text with spaces:-42:,,,
 
-3. Decoded back to JSON (537 bytes):
-{"project": "c0", "description": "A human-readable binary format with spaces preserved!", ...}
+3. Decoded back to JSON (493 bytes):
+{"project": "c0", "description": "A human-readable binary format!", ...}
 
 4. Type verification:
 object{11 keys}:
@@ -212,7 +212,7 @@ object{11 keys}:
   "downloads": 42
   ... and 6 more keys
 
-=== Size: JSON 615 bytes -> C0 445 bytes (72.4%) ===
+=== Size: JSON 571 bytes -> C0 401 bytes (70.2%) ===
 
 === Bonus: Printable-Binary Encoding Demo ===
 
@@ -245,7 +245,7 @@ object{11 keys}:
    Decoded: {"inner": [1, 2, 3], "nested": true}
 ```
 
-Notice how the C0 output remains readable: `human˗readable`, `Hello٫ Worldǃ`, with real spaces preserved. The hyphens, commas, and exclamation marks in string content become distinctive Unicode glyphs (`˗`, `٫`, `ǃ`) while the structural delimiters (`{`, `[`, `,`, `:`) remain as ASCII.
+Notice how the C0 output remains readable: `human˗readable`, `Hello٫ Worldǃ`. The hyphens, commas, and exclamation marks in string content become distinctive Unicode glyphs (`˗`, `٫`, `ǃ`) while the structural delimiters (`{`, `[`, `,`, `:`) remain as ASCII.
 
 ### Binary Demo
 Shows C0 as a container for arbitrary binary data:
