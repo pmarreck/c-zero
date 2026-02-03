@@ -10,20 +10,23 @@ A hierarchical binary data stream format designed for human-readable UTF-8 envir
 |----------|-------------|-------------|---------------|
 | JSON + Base64 | Encoded to ASCII gibberish | Poor | ~33% |
 | MessagePack | Raw binary | None (binary format) | Minimal |
-| C0 | Encoded to readable UTF-8 | Good - ASCII stays readable | ~15-40% |
+| C0 | Encoded to readable UTF-8 | Good - ASCII/spaces preserved | ~5-40%* |
+
+*Text-heavy data can be smaller than base64; pure binary has higher overhead
 
 **Example:** Embedding `"Hello, World!\x00\x01\x02"` in a structure:
 
 ```
 JSON:     {"data": "SGVsbG8sIFdvcmxkIQABAg=="}  (base64 - unreadable)
-C0:       {data:Hello٫␣Worldǃ·¯«,              (readable!)
+C0:       {data:Hello٫ Worldǃ·¯«,              (readable!)
 ```
 
-The ASCII text "Hello, World!" remains visible in C0 output, while special bytes become recognizable Unicode glyphs.
+The ASCII text "Hello, World!" remains visible in C0 output (including spaces!), while special bytes become recognizable Unicode glyphs. Only the comma and exclamation mark are encoded (`٫` and `ǃ`) because they're structural delimiters.
 
 ## Features
 
-- **Human-readable binary** - ASCII text stays readable; binary becomes recognizable glyphs
+- **Human-readable binary** - ASCII text (including spaces) stays readable; binary becomes recognizable glyphs
+- **Space-efficient** - Spaces pass through unchanged, often beating base64 for text-heavy data
 - **No escaping needed** - Structural delimiters never appear in payloads (printable_binary encoding)
 - **Streaming-safe** - Parse in a single left-to-right pass without backtracking
 - **UTF-8 native** - Output is always valid UTF-8
@@ -109,6 +112,7 @@ C0 uses intelligent encoding to avoid double-encoding:
 - Data that doesn't need encoding (no structural bytes, valid UTF-8) passes through unchanged
 - Data that's already printable_binary encoded is detected and not re-encoded
 - Only data requiring encoding (contains structural bytes, control chars, or invalid UTF-8) gets encoded
+- **Spaces pass through by default** for readability and smaller output (configurable)
 
 ### Examples
 
@@ -130,10 +134,10 @@ C0 uses intelligent encoding to avoid double-encoding:
 **Binary data with visible ASCII:**
 ```
 Input:  \x89PNG\r\n + "Hello from binary!"
-Output: ɃPNG⏎¶Hello␣from␣binaryǃ
+Output: ɃPNG⏎¶Hello from binaryǃ
 ```
 
-The "PNG" and "Hello from binary!" parts remain readable, while control bytes become distinctive glyphs.
+The "PNG" and "Hello from binary!" parts remain readable (spaces included!), while control bytes become distinctive glyphs.
 
 ## Use Cases
 
@@ -160,15 +164,17 @@ zig build run-binary-demo
 Sample output:
 ```
 --- Demo 2: Structured Binary Message ---
-C0 encoded (129 bytes):
-{header:[⌦ELF:«:¯···:,payload:This␣is␣the␣payload...
+C0 encoded (113 bytes):
+{header:[⌦ELF:«:¯···:,payload:This is the payload data...
 
 --- Demo 4: Size Comparison with Base64 ---
 Data Type              Original         C0    Base64*
-ASCII text                   39         53         52
+ASCII text                   39         41         52
 Binary blob                  16         36         24
-Mixed data                   32         48         44
+Mixed data                   32         44         44
 ```
+
+Note: ASCII text (41 bytes) is now smaller than base64 (52 bytes) because spaces pass through unchanged!
 
 ## Documentation
 

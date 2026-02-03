@@ -8,7 +8,8 @@ const enc = @import("encoding.zig");
 /// Options for C0 encoding
 pub const EncodeOptions = struct {
     /// Allow literal spaces in payloads (don't force encoding for spaces)
-    allow_spaces: bool = false,
+    /// Default true: spaces pass through unchanged for better readability and smaller output
+    allow_spaces: bool = true,
     /// Allow literal tabs in payloads (don't force encoding for tabs)
     allow_tabs: bool = false,
 };

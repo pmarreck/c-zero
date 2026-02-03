@@ -26,7 +26,8 @@ pub fn isStructural(byte: u8) bool {
 /// Options for smart payload encoding
 pub const EncodePayloadOptions = struct {
     /// Allow literal spaces in output (don't force encoding for spaces)
-    allow_spaces: bool = false,
+    /// Default true: spaces pass through unchanged for better readability
+    allow_spaces: bool = true,
     /// Allow literal tabs in output (don't force encoding for tabs)
     allow_tabs: bool = false,
 };
@@ -36,6 +37,9 @@ pub const DecodePayloadOptions = struct {
     /// If true and data appears to be printable-binary encoded, leave it as-is
     /// Useful for JSON output where we want readable strings
     keep_printable: bool = false,
+    /// Treat literal spaces as data (decode them to space bytes)
+    /// Default true: matches the encoding default
+    allow_spaces: bool = true,
 };
 
 /// Check if a byte is a control character that always requires encoding
@@ -78,10 +82,21 @@ pub fn needsEncoding(data: []const u8, options: EncodePayloadOptions) bool {
 
 /// Check if data appears to be already printable-binary encoded
 /// Returns true if every UTF-8 glyph is in the printable-binary target set
+/// The options parameter controls which whitespace characters are allowed
 pub fn isAlreadyEncoded(data: []const u8) bool {
-    // Build whitespace flags - we're checking if it's ALREADY encoded,
-    // so we don't allow any literal whitespace (it would have been encoded)
-    const ws_flags: c_uint = 0; // reject_all whitespace
+    return isAlreadyEncodedWithOptions(data, .{});
+}
+
+/// Check if data appears to be already printable-binary encoded with custom options
+pub fn isAlreadyEncodedWithOptions(data: []const u8, options: EncodePayloadOptions) bool {
+    // Build whitespace flags based on options
+    var ws_flags: c_uint = 0;
+    if (options.allow_spaces) {
+        ws_flags |= @intFromEnum(pb.WhitespaceFlags.allow_space);
+    }
+    if (options.allow_tabs) {
+        ws_flags |= @intFromEnum(pb.WhitespaceFlags.allow_tab);
+    }
     const result = pb.validate(data, ws_flags);
     return result.is_valid != 0;
 }
@@ -93,7 +108,7 @@ pub fn encodePayloadSmart(allocator: std.mem.Allocator, data: []const u8, option
     // First check if it needs encoding at all
     if (!needsEncoding(data, options)) {
         // Check if it's already encoded (all glyphs in target set)
-        if (isAlreadyEncoded(data)) {
+        if (isAlreadyEncodedWithOptions(data, options)) {
             // Already encoded, pass through
             return allocator.dupe(u8, data);
         }
@@ -111,15 +126,15 @@ pub fn encodePayloadSmart(allocator: std.mem.Allocator, data: []const u8, option
 /// Caller owns returned slice
 pub fn decodePayloadSmart(allocator: std.mem.Allocator, data: []const u8, options: DecodePayloadOptions) ![]u8 {
     if (options.keep_printable) {
-        // Check if data is all printable-binary glyphs
-        if (isAlreadyEncoded(data)) {
+        // Check if data is all printable-binary glyphs (with space allowance matching options)
+        if (isAlreadyEncodedWithOptions(data, .{ .allow_spaces = options.allow_spaces })) {
             // Keep as-is for readability
             return allocator.dupe(u8, data);
         }
     }
 
-    // Decode normally
-    return pb.decode(allocator, data, .{});
+    // Decode normally - pass spaces option to treat literal spaces as data
+    return pb.decode(allocator, data, .{ .spaces = options.allow_spaces });
 }
 
 /// Encode a string payload using printable_binary (always encodes)
@@ -129,9 +144,10 @@ pub fn encodePayload(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
 }
 
 /// Decode a string payload using printable_binary (always decodes)
+/// Treats literal spaces as data (space passthrough)
 /// Caller owns returned slice
 pub fn decodePayload(allocator: std.mem.Allocator, encoded: []const u8) ![]u8 {
-    return pb.decode(allocator, encoded, .{});
+    return pb.decode(allocator, encoded, .{ .spaces = true });
 }
 
 test "structural byte detection" {
@@ -224,9 +240,14 @@ test "isAlreadyEncoded recognizes printable-binary output" {
     try std.testing.expect(isAlreadyEncoded("hello"));
     try std.testing.expect(isAlreadyEncoded("ABC123"));
 
-    // Contains characters NOT in the printable-binary target set
-    try std.testing.expect(!isAlreadyEncoded("hello world")); // space not in target
+    // With default allow_spaces=true, spaces are accepted
+    try std.testing.expect(isAlreadyEncoded("hello world")); // space allowed by default
+
+    // Newlines are never allowed
     try std.testing.expect(!isAlreadyEncoded("hello\nworld")); // newline not in target
+
+    // With explicit allow_spaces=false, spaces are rejected
+    try std.testing.expect(!isAlreadyEncodedWithOptions("hello world", .{ .allow_spaces = false }));
 }
 
 test "encodePayloadSmart avoids double-encoding" {
