@@ -508,7 +508,8 @@ pub fn toC0ValueWithOptions(allocator: std.mem.Allocator, json: JsonValue, optio
         .string => |s| {
             // Optionally encode string content with printable_binary, prepend raw quote marker
             if (options.encode_strings) {
-                const encoded_content = try enc.encodePayload(allocator, s);
+                // Use smart encoding which preserves spaces by default
+                const encoded_content = try enc.encodePayloadSmart(allocator, s, .{});
                 defer allocator.free(encoded_content);
 
                 const result = try allocator.alloc(u8, 1 + encoded_content.len);
@@ -539,9 +540,9 @@ pub fn toC0ValueWithOptions(allocator: std.mem.Allocator, json: JsonValue, optio
             const entries = try allocator.alloc(Entry, obj.len);
             errdefer allocator.free(entries);
             for (obj, 0..) |entry, i| {
-                // Optionally encode keys with printable_binary
+                // Optionally encode keys with printable_binary (smart encoding preserves spaces)
                 const key = if (options.encode_keys)
-                    try enc.encodePayload(allocator, entry.key)
+                    try enc.encodePayloadSmart(allocator, entry.key, .{})
                 else
                     try allocator.dupe(u8, entry.key);
                 entries[i] = .{

@@ -2,6 +2,8 @@
 
 A hierarchical binary data stream format designed for human-readable UTF-8 environments.
 
+C0 builds on [**printable-binary**](https://github.com/pmarreck/printable-binary), a separate encoding that transforms arbitrary bytes into readable UTF-8 glyphs. While printable-binary handles the byte-to-glyph mapping, C0 adds hierarchical structure (arrays and objects) on top.
+
 ## Why C0?
 
 **C0 solves the "binary in text" problem differently:**
@@ -175,6 +177,18 @@ Mixed data                   32         44         44
 ```
 
 Note: ASCII text (41 bytes) is now smaller than base64 (52 bytes) because spaces pass through unchanged!
+
+## Dependencies
+
+### printable-binary
+
+C0 uses [printable-binary](https://github.com/pmarreck/printable-binary) for encoding arbitrary bytes into readable UTF-8 glyphs. This is a **separate, independent project** that can be used standalone for any binary-to-text encoding needs.
+
+Key features of printable-binary:
+- Every byte (0x00-0xFF) maps to a distinct, visually recognizable UTF-8 glyph
+- ASCII text passes through unchanged (including spaces by default)
+- Structural delimiters used by C0 are escaped: `{→❴`, `[→⟦`, `,→٫`, `:→꞉`
+- Fully reversible - decode always recovers the original bytes
 
 ## Documentation
 

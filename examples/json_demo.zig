@@ -9,6 +9,11 @@
 //!   true/false/null: literal keywords
 //!   empty string: just '"' (solves the [""] ambiguity!)
 //!
+//! Also demonstrates:
+//!   - Space preservation in text (spaces pass through unchanged)
+//!   - Embedded JSON in string values (delimiters get escaped, remains readable)
+//!   - Printable-binary encoded binary data (showcasing the pb encoding)
+//!
 //! Run with: zig build run-json-demo
 
 const std = @import("std");
@@ -33,27 +38,30 @@ pub fn main() !void {
     const stdout = &stdout_writer.interface;
     defer stdout.flush() catch {};
 
-    // Full JSON with all types
+    // Full JSON with all types, including spaces, embedded JSON, and binary showcase
     const json_input =
         \\{
         \\  "project": "c0",
+        \\  "description": "A human-readable binary format with spaces preserved!",
         \\  "version": "0.1.0",
         \\  "stable": false,
         \\  "downloads": 42,
         \\  "rating": 4.5,
         \\  "deprecated": null,
-        \\  "keywords": ["binary", "format", "streaming"],
+        \\  "keywords": ["binary", "format", "streaming", "human readable"],
         \\  "empty_string_test": "",
         \\  "empty_array_test": [],
+        \\  "embedded_json": "{\"nested\": true, \"array\": [1, 2, 3]}",
         \\  "config": {
         \\    "debug": true,
         \\    "timeout_ms": 30000,
         \\    "ratio": 1.5e-3,
+        \\    "message": "Hello, World! Spaces are preserved.",
         \\    "features": {
         \\      "escaping": false,
         \\      "utf8": true,
         \\      "nested_arrays": [[1, 2], [3, 4]],
-        \\      "mixed": [null, true, "text", -42]
+        \\      "mixed": [null, true, "text with spaces", -42]
         \\    }
         \\  }
         \\}
@@ -123,11 +131,60 @@ pub fn main() !void {
 
     // Show compression ratio
     const ratio = @as(f64, @floatFromInt(c0_encoded.len)) / @as(f64, @floatFromInt(json_input.len)) * 100.0;
-    try stdout.print("=== Size: JSON {d} bytes -> C0 {d} bytes ({d:.1}%) ===\n", .{
+    try stdout.print("=== Size: JSON {d} bytes -> C0 {d} bytes ({d:.1}%) ===\n\n", .{
         json_input.len,
         c0_encoded.len,
         ratio,
     });
+
+    // =========================================================================
+    // Bonus: Demonstrate printable-binary encoding directly
+    // =========================================================================
+    try stdout.print("=== Bonus: Printable-Binary Encoding Demo ===\n\n", .{});
+
+    // Show how binary data looks when encoded with printable-binary
+    const binary_data = "\x89PNG\r\n\x1a\n\x00\x01\x02\x03Hello\x00World";
+    const pb_encoded = try core.encodePayload(allocator, binary_data);
+    defer allocator.free(pb_encoded);
+
+    try stdout.print("5. Raw binary ({d} bytes):\n", .{binary_data.len});
+    try stdout.print("   ", .{});
+    for (binary_data) |b| {
+        if (b >= 0x20 and b < 0x7f) {
+            try stdout.print("{c}", .{b});
+        } else {
+            try stdout.print("\\x{x:0>2}", .{b});
+        }
+    }
+    try stdout.print("\n\n", .{});
+
+    try stdout.print("6. Printable-binary encoded ({d} bytes):\n", .{pb_encoded.len});
+    try stdout.print("   {s}\n\n", .{pb_encoded});
+
+    // Show this binary data embedded in a JSON string via C0
+    try stdout.print("7. Embedding binary in JSON via C0:\n", .{});
+    // We'll show what the C0 output looks like with actual binary in the string
+    var binary_entries = [_]core.Entry{
+        .{ .key = "png_header", .value = .{ .string = pb_encoded } },
+        .{ .key = "description", .value = .{ .string = "PNG file with null bytes embedded!" } },
+    };
+    const binary_obj = Value{ .object = &binary_entries };
+    const binary_c0 = try core.encode(allocator, binary_obj);
+    defer allocator.free(binary_c0);
+
+    try stdout.print("   C0 output ({d} bytes):\n   {s}\n\n", .{ binary_c0.len, binary_c0 });
+    try stdout.print("   Note: The binary data remains readable as printable-binary glyphs!\n", .{});
+    try stdout.print("   'PNG' is visible, control bytes become distinct Unicode characters.\n\n", .{});
+
+    // Show embedded JSON in a string
+    try stdout.print("8. Embedded JSON string demonstration:\n", .{});
+    const embedded = "{\"inner\": [1, 2, 3], \"nested\": true}";
+    const embedded_encoded = try core.encodePayload(allocator, embedded);
+    defer allocator.free(embedded_encoded);
+
+    try stdout.print("   Original:  {s}\n", .{embedded});
+    try stdout.print("   In C0:     {s}\n", .{embedded_encoded});
+    try stdout.print("   Delimiters {{ [ , : become ❴ ⟦ ٫ ꞉ but text stays readable!\n", .{});
 }
 
 fn verifyTypes(stdout: anytype, val: JsonValue, depth: usize) !void {
@@ -343,4 +400,121 @@ test "nested arrays round-trip" {
     try std.testing.expect(decoded.array[1] == .array);
     try std.testing.expectEqual(@as(usize, 2), decoded.array[0].array.len);
     try std.testing.expectEqual(@as(usize, 2), decoded.array[1].array.len);
+}
+
+test "JSON -> C0 -> JSON full round-trip structural equivalence" {
+    const allocator = std.testing.allocator;
+
+    // Complex JSON with all types, spaces, embedded JSON, and nested structures
+    const input =
+        \\{
+        \\  "project": "c0",
+        \\  "description": "A human-readable binary format with spaces preserved!",
+        \\  "version": "0.1.0",
+        \\  "stable": false,
+        \\  "downloads": 42,
+        \\  "rating": 4.5,
+        \\  "deprecated": null,
+        \\  "keywords": ["binary", "format", "streaming", "human readable"],
+        \\  "empty_string_test": "",
+        \\  "empty_array_test": [],
+        \\  "embedded_json": "{\"nested\": true, \"array\": [1, 2, 3]}",
+        \\  "config": {
+        \\    "debug": true,
+        \\    "timeout_ms": 30000,
+        \\    "ratio": 1.5e-3,
+        \\    "message": "Hello, World! Spaces are preserved.",
+        \\    "features": {
+        \\      "escaping": false,
+        \\      "utf8": true,
+        \\      "nested_arrays": [[1, 2], [3, 4]],
+        \\      "mixed": [null, true, "text with spaces", -42]
+        \\    }
+        \\  }
+        \\}
+    ;
+
+    // Parse original JSON
+    const original_parsed = try json.parseJson(allocator, input);
+    defer json.freeJsonValue(allocator, original_parsed);
+
+    // Serialize original to canonical form
+    const original_canonical = try json.stringify(allocator, original_parsed);
+    defer allocator.free(original_canonical);
+
+    // Round-trip through C0
+    const c0_val = try json.toC0Value(allocator, original_parsed);
+    defer json.freeC0Value(allocator, c0_val);
+
+    const encoded = try core.encodeRaw(allocator, c0_val);
+    defer allocator.free(encoded);
+
+    const decoded_c0 = try core.decode(allocator, encoded);
+    defer core.deinit(allocator, decoded_c0);
+
+    const round_trip_parsed = try json.fromC0Value(allocator, decoded_c0);
+    defer json.freeJsonValue(allocator, round_trip_parsed);
+
+    // Serialize round-tripped to canonical form
+    const round_trip_canonical = try json.stringify(allocator, round_trip_parsed);
+    defer allocator.free(round_trip_canonical);
+
+    // Canonical forms must match - this proves structural equivalence
+    try std.testing.expectEqualStrings(original_canonical, round_trip_canonical);
+}
+
+test "JSON with spaces in strings round-trip" {
+    const allocator = std.testing.allocator;
+
+    const input = "{\"greeting\": \"Hello, World! How are you today?\"}";
+
+    const parsed = try json.parseJson(allocator, input);
+    defer json.freeJsonValue(allocator, parsed);
+
+    const c0_val = try json.toC0Value(allocator, parsed);
+    defer json.freeC0Value(allocator, c0_val);
+
+    const encoded = try core.encodeRaw(allocator, c0_val);
+    defer allocator.free(encoded);
+
+    const decoded_c0 = try core.decode(allocator, encoded);
+    defer core.deinit(allocator, decoded_c0);
+
+    const decoded = try json.fromC0Value(allocator, decoded_c0);
+    defer json.freeJsonValue(allocator, decoded);
+
+    // Verify the string with spaces is preserved exactly
+    try std.testing.expect(decoded == .object);
+    try std.testing.expectEqual(@as(usize, 1), decoded.object.len);
+    try std.testing.expectEqualStrings("greeting", decoded.object[0].key);
+    try std.testing.expect(decoded.object[0].value == .string);
+    try std.testing.expectEqualStrings("Hello, World! How are you today?", decoded.object[0].value.string);
+}
+
+test "embedded JSON string round-trip" {
+    const allocator = std.testing.allocator;
+
+    // JSON string containing JSON - the embedded JSON delimiters should be escaped
+    const input = "{\"data\": \"{\\\"key\\\": [1, 2, 3]}\"}";
+
+    const parsed = try json.parseJson(allocator, input);
+    defer json.freeJsonValue(allocator, parsed);
+
+    const c0_val = try json.toC0Value(allocator, parsed);
+    defer json.freeC0Value(allocator, c0_val);
+
+    const encoded = try core.encodeRaw(allocator, c0_val);
+    defer allocator.free(encoded);
+
+    const decoded_c0 = try core.decode(allocator, encoded);
+    defer core.deinit(allocator, decoded_c0);
+
+    const decoded = try json.fromC0Value(allocator, decoded_c0);
+    defer json.freeJsonValue(allocator, decoded);
+
+    // Verify the embedded JSON is preserved exactly
+    try std.testing.expect(decoded == .object);
+    try std.testing.expectEqualStrings("data", decoded.object[0].key);
+    try std.testing.expect(decoded.object[0].value == .string);
+    try std.testing.expectEqualStrings("{\"key\": [1, 2, 3]}", decoded.object[0].value.string);
 }
