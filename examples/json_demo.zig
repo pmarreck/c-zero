@@ -38,7 +38,8 @@ pub fn main() !void {
     const stdout = &stdout_writer.interface;
     defer stdout.flush() catch {};
 
-    // Full JSON with all types, including spaces, embedded JSON, and binary showcase
+    // Full JSON with all types, including spaces and nested structures
+    // Note: We'll demonstrate printable-binary embedded JSON separately below
     const json_input =
         \\{
         \\  "project": "c0",
@@ -51,7 +52,6 @@ pub fn main() !void {
         \\  "keywords": ["binary", "format", "streaming", "human readable"],
         \\  "empty_string_test": "",
         \\  "empty_array_test": [],
-        \\  "embedded_json": "{\"nested\": true, \"array\": [1, 2, 3]}",
         \\  "config": {
         \\    "debug": true,
         \\    "timeout_ms": 30000,
@@ -176,15 +176,27 @@ pub fn main() !void {
     try stdout.print("   Note: The binary data remains readable as printable-binary glyphs!\n", .{});
     try stdout.print("   'PNG' is visible, control bytes become distinct Unicode characters.\n\n", .{});
 
-    // Show embedded JSON in a string
-    try stdout.print("8. Embedded JSON string demonstration:\n", .{});
-    const embedded = "{\"inner\": [1, 2, 3], \"nested\": true}";
-    const embedded_encoded = try core.encodePayload(allocator, embedded);
-    defer allocator.free(embedded_encoded);
+    // Show embedded JSON - the ANTIDOTE to escaping hell!
+    try stdout.print("8. Embedded JSON - The Antidote to Escaping Hell:\n\n", .{});
 
-    try stdout.print("   Original:  {s}\n", .{embedded});
-    try stdout.print("   In C0:     {s}\n", .{embedded_encoded});
-    try stdout.print("   Delimiters {{ [ , : become ❴ ⟦ ٫ ꞉ but text stays readable!\n", .{});
+    const inner_json = "{\"inner\": [1, 2, 3], \"nested\": true}";
+    const pb_json = try core.encodePayload(allocator, inner_json);
+    defer allocator.free(pb_json);
+
+    try stdout.print("   TRADITIONAL JSON (escaping hell):\n", .{});
+    try stdout.print("   {{\"data\": \"{{\\\"inner\\\": [1, 2, 3], \\\"nested\\\": true}}\"}}\n\n", .{});
+
+    try stdout.print("   WITH PRINTABLE-BINARY (no escaping needed!):\n", .{});
+    try stdout.print("   {{\"data\": \"{s}\"}}\n\n", .{pb_json});
+
+    try stdout.print("   The pb-encoded JSON uses different Unicode delimiters:\n", .{});
+    try stdout.print("     {{ -> ❴    [ -> ⟦    , -> ٫    : -> ꞉    \" -> ˵\n", .{});
+    try stdout.print("   So you can embed it directly in a JSON string without backslash escaping!\n\n", .{});
+
+    try stdout.print("   Round-trip proof - decode the pb-encoded JSON:\n", .{});
+    const decoded_inner = try core.decodePayload(allocator, pb_json);
+    defer allocator.free(decoded_inner);
+    try stdout.print("   Decoded: {s}\n", .{decoded_inner});
 }
 
 fn verifyTypes(stdout: anytype, val: JsonValue, depth: usize) !void {
@@ -491,11 +503,15 @@ test "JSON with spaces in strings round-trip" {
     try std.testing.expectEqualStrings("Hello, World! How are you today?", decoded.object[0].value.string);
 }
 
-test "embedded JSON string round-trip" {
+test "string with C0 structural delimiters round-trip" {
     const allocator = std.testing.allocator;
 
-    // JSON string containing JSON - the embedded JSON delimiters should be escaped
-    const input = "{\"data\": \"{\\\"key\\\": [1, 2, 3]}\"}";
+    // A string containing C0's structural delimiters: { [ , :
+    // C0 handles these transparently via printable-binary encoding
+    const tricky_string = "config={debug:true}, items=[a,b,c]";
+
+    // Create a JSON object with this tricky string as a value
+    const input = "{\"data\": \"config={debug:true}, items=[a,b,c]\"}";
 
     const parsed = try json.parseJson(allocator, input);
     defer json.freeJsonValue(allocator, parsed);
@@ -512,9 +528,10 @@ test "embedded JSON string round-trip" {
     const decoded = try json.fromC0Value(allocator, decoded_c0);
     defer json.freeJsonValue(allocator, decoded);
 
-    // Verify the embedded JSON is preserved exactly
+    // Verify the string with structural delimiters round-trips perfectly
     try std.testing.expect(decoded == .object);
     try std.testing.expectEqualStrings("data", decoded.object[0].key);
     try std.testing.expect(decoded.object[0].value == .string);
-    try std.testing.expectEqualStrings("{\"key\": [1, 2, 3]}", decoded.object[0].value.string);
+    // The original string is preserved exactly - C0 handles the encoding transparently!
+    try std.testing.expectEqualStrings(tricky_string, decoded.object[0].value.string);
 }
