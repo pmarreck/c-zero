@@ -14,6 +14,7 @@ pub const US = encoding.US;
 
 pub const encoder = @import("encoder.zig");
 pub const encode = encoder.encode;
+pub const encodeRaw = encoder.encodeRaw;
 
 pub const decoder = @import("decoder.zig");
 pub const decode = decoder.decode;

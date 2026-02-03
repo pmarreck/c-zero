@@ -6,27 +6,44 @@ const Entry = @import("value.zig").Entry;
 const enc = @import("encoding.zig");
 
 /// Encode a Value to C0 binary format
+/// Applies printable_binary encoding to payloads
 /// Caller owns returned slice and must free with same allocator
 pub fn encode(allocator: std.mem.Allocator, val: Value) ![]u8 {
     var result: std.ArrayListUnmanaged(u8) = .{};
     errdefer result.deinit(allocator);
 
-    try encodeValue(allocator, &result, val);
+    try encodeValue(allocator, &result, val, true);
 
     return result.toOwnedSlice(allocator);
 }
 
-fn encodeValue(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), val: Value) !void {
+/// Encode a Value to C0 binary format without payload encoding
+/// Payloads are written as-is (caller is responsible for ensuring no structural bytes)
+/// Caller owns returned slice and must free with same allocator
+pub fn encodeRaw(allocator: std.mem.Allocator, val: Value) ![]u8 {
+    var result: std.ArrayListUnmanaged(u8) = .{};
+    errdefer result.deinit(allocator);
+
+    try encodeValue(allocator, &result, val, false);
+
+    return result.toOwnedSlice(allocator);
+}
+
+fn encodeValue(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), val: Value, encode_payloads: bool) !void {
     switch (val) {
         .string => |s| {
-            const encoded = try enc.encodePayload(allocator, s);
-            defer allocator.free(encoded);
-            try out.appendSlice(allocator, encoded);
+            if (encode_payloads) {
+                const encoded = try enc.encodePayload(allocator, s);
+                defer allocator.free(encoded);
+                try out.appendSlice(allocator, encoded);
+            } else {
+                try out.appendSlice(allocator, s);
+            }
         },
         .array => |arr| {
             try out.append(allocator, enc.GS);
             for (arr) |item| {
-                try encodeValue(allocator, out, item);
+                try encodeValue(allocator, out, item, encode_payloads);
                 try out.append(allocator, enc.US);
             }
             // Empty array still needs trailing US (spec: GS US)
@@ -38,12 +55,16 @@ fn encodeValue(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), v
             try out.append(allocator, enc.FS);
             for (obj) |entry| {
                 // Key
-                const key_encoded = try enc.encodePayload(allocator, entry.key);
-                defer allocator.free(key_encoded);
-                try out.appendSlice(allocator, key_encoded);
+                if (encode_payloads) {
+                    const key_encoded = try enc.encodePayload(allocator, entry.key);
+                    defer allocator.free(key_encoded);
+                    try out.appendSlice(allocator, key_encoded);
+                } else {
+                    try out.appendSlice(allocator, entry.key);
+                }
                 try out.append(allocator, enc.US);
                 // Value
-                try encodeValue(allocator, out, entry.value);
+                try encodeValue(allocator, out, entry.value, encode_payloads);
                 try out.append(allocator, enc.RS);
             }
             // Empty object still needs trailing RS (spec: FS RS)

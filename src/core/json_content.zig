@@ -1,18 +1,20 @@
 //! JSON Content Encoder/Decoder for C0
 //!
 //! Encodes JSON scalar types into C0 payloads:
-//! - strings: '"' + content (no closing quote, no escaping - C0 structure delimits)
-//! - numbers: decimal/scientific notation as-is
-//! - true: literal "true"
-//! - false: literal "false"
-//! - null: literal "null"
+//! - strings: '"' + printable_binary(content) - only content is encoded
+//! - numbers: decimal/scientific notation as-is (no encoding)
+//! - true: literal "true" (no encoding)
+//! - false: literal "false" (no encoding)
+//! - null: literal "null" (no encoding)
 //!
-//! The C0 structural delimiters (US, RS) mark value boundaries,
-//! so no escaping is needed within payloads.
+//! The C0 structural delimiters (US, RS) mark value boundaries.
+//! Only string content goes through printable_binary encoding.
+//! Type markers (", digits, keywords) stay as raw ASCII.
 
 const std = @import("std");
 const Value = @import("value.zig").Value;
 const Entry = @import("value.zig").Entry;
+const enc = @import("encoding.zig");
 
 pub const JsonType = enum {
     string,
@@ -473,8 +475,11 @@ fn stringifyValue(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8)
 // C0 Conversion - Convert between JsonValue and C0 Value
 // ============================================================================
 
-/// Convert JsonValue to C0 Value (for encoding)
-/// Scalars are encoded with type markers, structures map directly
+/// Convert JsonValue to C0 Value (for encoding with encodeRaw)
+/// - Strings: '"' marker (raw) + printable_binary encoded content
+/// - Numbers/booleans/null: raw literals (no encoding)
+/// - Keys: printable_binary encoded (keys are always strings)
+/// Use encoder.encodeRaw() to write the result (not encode())
 pub fn toC0Value(allocator: std.mem.Allocator, json: JsonValue) !Value {
     switch (json) {
         .null => {
@@ -487,11 +492,14 @@ pub fn toC0Value(allocator: std.mem.Allocator, json: JsonValue) !Value {
             return Value{ .string = try allocator.dupe(u8, n) };
         },
         .string => |s| {
-            // Prepend quote marker
-            const result = try allocator.alloc(u8, 1 + s.len);
+            // Encode string content with printable_binary, prepend raw quote marker
+            const encoded_content = try enc.encodePayload(allocator, s);
+            defer allocator.free(encoded_content);
+
+            const result = try allocator.alloc(u8, 1 + encoded_content.len);
             result[0] = '"';
-            if (s.len > 0) {
-                @memcpy(result[1..], s);
+            if (encoded_content.len > 0) {
+                @memcpy(result[1..], encoded_content);
             }
             return Value{ .string = result };
         },
@@ -507,8 +515,10 @@ pub fn toC0Value(allocator: std.mem.Allocator, json: JsonValue) !Value {
             const entries = try allocator.alloc(Entry, obj.len);
             errdefer allocator.free(entries);
             for (obj, 0..) |entry, i| {
+                // Keys are strings, so encode them with printable_binary
+                const encoded_key = try enc.encodePayload(allocator, entry.key);
                 entries[i] = .{
-                    .key = try allocator.dupe(u8, entry.key),
+                    .key = encoded_key,
                     .value = try toC0Value(allocator, entry.value),
                 };
             }
@@ -518,7 +528,9 @@ pub fn toC0Value(allocator: std.mem.Allocator, json: JsonValue) !Value {
 }
 
 /// Convert C0 Value to JsonValue (for decoding)
-/// Decodes type markers from scalar payloads
+/// - Strings: strip '"' marker, decode content with printable_binary
+/// - Numbers/booleans/null: parse as-is
+/// - Keys: decode with printable_binary
 pub fn fromC0Value(allocator: std.mem.Allocator, val: Value) !JsonValue {
     switch (val) {
         .string => |payload| {
@@ -528,7 +540,11 @@ pub fn fromC0Value(allocator: std.mem.Allocator, val: Value) !JsonValue {
                 .true => JsonValue{ .boolean = true },
                 .false => JsonValue{ .boolean = false },
                 .number => JsonValue{ .number = try allocator.dupe(u8, scalar.content) },
-                .string => JsonValue{ .string = try allocator.dupe(u8, scalar.content) },
+                .string => {
+                    // Decode string content with printable_binary
+                    const decoded = try enc.decodePayload(allocator, scalar.content);
+                    return JsonValue{ .string = decoded };
+                },
             };
         },
         .array => |arr| {
@@ -543,8 +559,10 @@ pub fn fromC0Value(allocator: std.mem.Allocator, val: Value) !JsonValue {
             const entries = try allocator.alloc(JsonEntry, obj.len);
             errdefer allocator.free(entries);
             for (obj, 0..) |entry, i| {
+                // Decode key with printable_binary
+                const decoded_key = try enc.decodePayload(allocator, entry.key);
                 entries[i] = .{
-                    .key = try allocator.dupe(u8, entry.key),
+                    .key = decoded_key,
                     .value = try fromC0Value(allocator, entry.value),
                 };
             }
@@ -750,7 +768,7 @@ test "JSON -> C0 -> JSON round-trip with types" {
     defer freeC0Value(allocator, c0_val);
 
     // Encode to C0 bytes
-    const c0_bytes = try encoder.encode(allocator, c0_val);
+    const c0_bytes = try encoder.encodeRaw(allocator, c0_val);
     defer allocator.free(c0_bytes);
 
     // Decode C0 bytes
@@ -806,7 +824,7 @@ test "empty string round-trip" {
     defer freeC0Value(allocator, c0_val);
 
     // Encode
-    const c0_bytes = try encoder.encode(allocator, c0_val);
+    const c0_bytes = try encoder.encodeRaw(allocator, c0_val);
     defer allocator.free(c0_bytes);
 
     // Decode

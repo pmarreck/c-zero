@@ -75,8 +75,8 @@ pub fn main() !void {
     const c0_value = try json.toC0Value(allocator, parsed);
     defer json.freeC0Value(allocator, c0_value);
 
-    // Step 3: Encode to C0 bytes
-    const c0_encoded = try core.encode(allocator, c0_value);
+    // Step 3: Encode to C0 bytes (use encodeRaw - content encoding already done)
+    const c0_encoded = try core.encodeRaw(allocator, c0_value);
     defer allocator.free(c0_encoded);
 
     try stdout.print("2. C0 encoded ({d} bytes):\n", .{c0_encoded.len});
@@ -265,7 +265,7 @@ test "JSON -> C0 -> JSON round-trip preserves types" {
     defer json.freeC0Value(allocator, c0_val);
 
     // Encode
-    const encoded = try core.encode(allocator, c0_val);
+    const encoded = try core.encodeRaw(allocator, c0_val);
     defer allocator.free(encoded);
 
     // Decode
@@ -303,7 +303,7 @@ test "empty string round-trip" {
     const c0_val = try json.toC0Value(allocator, parsed);
     defer json.freeC0Value(allocator, c0_val);
 
-    const encoded = try core.encode(allocator, c0_val);
+    const encoded = try core.encodeRaw(allocator, c0_val);
     defer allocator.free(encoded);
 
     const decoded_c0 = try core.decode(allocator, encoded);
@@ -330,7 +330,7 @@ test "nested arrays round-trip" {
     const c0_val = try json.toC0Value(allocator, parsed);
     defer json.freeC0Value(allocator, c0_val);
 
-    const encoded = try core.encode(allocator, c0_val);
+    const encoded = try core.encodeRaw(allocator, c0_val);
     defer allocator.free(encoded);
 
     const decoded_c0 = try core.decode(allocator, encoded);
