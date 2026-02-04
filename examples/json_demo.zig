@@ -181,7 +181,85 @@ pub fn main() !void {
     try stdout.print("   Round-trip proof - decode the pb-encoded JSON:\n", .{});
     const decoded_inner = try core.decodePayload(allocator, pb_json);
     defer allocator.free(decoded_inner);
-    try stdout.print("   Decoded: {s}\n", .{decoded_inner});
+    try stdout.print("   Decoded: {s}\n\n", .{decoded_inner});
+
+    // =========================================================================
+    // Demo 9: Binary-in-JSON via C0 - Inspectable Data on the Wire
+    // =========================================================================
+    try stdout.print("9. Binary-in-JSON: Inspectable Data Pipeline\n\n", .{});
+    try stdout.print("   C0 lets you embed binary in structured data that remains human-readable.\n", .{});
+    try stdout.print("   Add compression (gzip/zstd) for wire efficiency - decompress to inspect!\n\n", .{});
+
+    // Simulate a PNG-like payload with metadata
+    const png_signature = "\x89PNG\r\n\x1a\n";
+    const ihdr_chunk = "\x00\x00\x00\x0dIHDR\x00\x00\x00\x80\x00\x00\x00\x60\x08\x06\x00\x00\x00";
+    const fake_image_data = "IDAT" ++ ("\x00" ** 50) ++ "compressed pixel data here" ++ ("\xFF" ** 30);
+    const png_data = png_signature ++ ihdr_chunk ++ fake_image_data;
+
+    // Create a JSON structure with binary + metadata
+    const metadata_json =
+        \\{"filename": "avatar.png", "width": 128, "height": 96, "format": "RGBA"}
+    ;
+
+    // Parse and convert metadata to C0
+    const meta_parsed = json.parseJson(allocator, metadata_json) catch |err| {
+        try stdout.print("JSON parse error: {any}\n", .{err});
+        return;
+    };
+    defer json.freeJsonValue(allocator, meta_parsed);
+
+    // Encode PNG data with printable-binary
+    const pb_png = try core.encodePayload(allocator, png_data);
+    defer allocator.free(pb_png);
+
+    // Build C0 structure: {metadata:{...}, image_data: <pb-encoded PNG>}
+    const meta_c0 = try json.toC0Value(allocator, meta_parsed);
+    defer json.freeC0Value(allocator, meta_c0);
+
+    var image_msg_entries = [_]core.Entry{
+        .{ .key = "metadata", .value = meta_c0 },
+        .{ .key = "image_data", .value = .{ .string = pb_png } },
+    };
+    const image_msg = core.Value{ .object = &image_msg_entries };
+    const c0_image = try core.encode(allocator, image_msg);
+    defer allocator.free(c0_image);
+
+    try stdout.print("   a) Raw PNG binary: {d} bytes\n", .{png_data.len});
+    try stdout.print("   b) C0 with metadata: {d} bytes\n", .{c0_image.len});
+    try stdout.print("      Overhead: {d} bytes for structure + readability\n\n", .{c0_image.len - png_data.len});
+
+    // Show the full C0 output - it's inspectable!
+    try stdout.print("   C0 output (human-readable!):\n   {s}\n\n", .{c0_image});
+
+    try stdout.print("   Notice: 'PNG', 'IHDR', 'IDAT' markers visible! Metadata is structured!\n\n", .{});
+
+    // Decode it back to prove round-trip
+    const decoded_image = try core.decode(allocator, c0_image);
+    defer core.deinit(allocator, decoded_image);
+
+    try stdout.print("   Round-trip verification:\n", .{});
+    if (decoded_image == .object) {
+        for (decoded_image.object) |entry| {
+            if (std.mem.eql(u8, entry.key, "metadata")) {
+                try stdout.print("   - metadata: (structured object with filename, dimensions)\n", .{});
+            }
+            if (std.mem.eql(u8, entry.key, "image_data")) {
+                if (entry.value == .string) {
+                    const recovered_png = try core.decodePayload(allocator, entry.value.string);
+                    defer allocator.free(recovered_png);
+                    try stdout.print("   - image_data decoded: {} ({d} bytes)\n", .{
+                        std.mem.eql(u8, recovered_png, png_data),
+                        recovered_png.len,
+                    });
+                }
+            }
+        }
+    }
+
+    try stdout.print("\n   Recommended pipeline for production:\n", .{});
+    try stdout.print("   1. Build structured message with C0 (inspectable at rest)\n", .{});
+    try stdout.print("   2. Compress with gzip/zstd before sending (efficient on wire)\n", .{});
+    try stdout.print("   3. Decompress on receive -> instantly readable for debugging!\n", .{});
 }
 
 fn verifyTypes(stdout: anytype, val: JsonValue, depth: usize) !void {
