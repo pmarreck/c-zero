@@ -4,8 +4,8 @@
 	.version = "0.1.0",
 	.dependencies = .{
 		.printable_binary = .{
-			.url = "git+https://github.com/pmarreck/printable-binary#124115c69f05d0a51a391f10538c63d8a199ac24",
-			.hash = "printable_binary-1.0.0-SdPiyocaFQDHvl28X-ZOWaqfaq_KivnabjQRZb9XA4na",
+			.url = "git+https://github.com/pmarreck/printable-binary#4e2a892e0664281f58b60abb3577aff7328ad6c5",
+			.hash = "printable_binary-1.0.0-SdPiyjRDFQCLMJMdg_UYZi-Qa_X_eYfNm2h8MmdN8cO6",
 		},
 	},
 	.paths = .{""},
