@@ -161,7 +161,7 @@ The "PNG" and "Hello from binary!" parts remain readable, while control bytes be
 
 ### JSON Demo
 
-The JSON demo shows bidirectional JSON ↔ C0 conversion. **Note:** JSON itself cannot contain raw binary data (it requires encoding like base64), so this demo is somewhat limiting compared to C0's full capabilities. However, it's included to demonstrate C0 and printable-binary in a relatable way, and to show how embedded JSON can avoid "escaping hell."
+The JSON demo shows **content-aware** JSON ↔ C0 conversion using a real-world [C2PA manifest](https://blog.cloudflare.com/preserve-content-credentials-with-cloudflare-images/) as input. C0 doesn't prescribe content semantics - the demo shows what an application-specific encoder might look like, with field-specific transforms for timestamps (→ 8-byte nanosecond-epoch binary) and cert fingerprints (→ raw binary), while keeping dimensions as readable numbers.
 
 ```bash
 zig build run-json-demo
@@ -169,50 +169,28 @@ zig build run-json-demo
 
 Full output:
 ```
-=== Full JSON <-> C0 Demo (Type-Preserving) ===
+=== C0 Content-Aware JSON Demo ===
 
-1. Input JSON (571 bytes):
-{
-  "project": "c0",
-  "description": "A human-readable binary format!",
-  "version": "0.1.0",
-  "stable": false,
-  "downloads": 42,
-  "rating": 4.5,
-  "deprecated": null,
-  "keywords": ["binary", "format", "streaming", "human readable"],
-  "empty_string_test": "",
-  "empty_array_test": [],
-  "config": {
-    "debug": true,
-    "timeout_ms": 30000,
-    "ratio": 1.5e-3,
-    "message": "Hello, World!",
-    "features": {
-      "escaping": false,
-      "utf8": true,
-      "nested_arrays": [[1, 2], [3, 4]],
-      "mixed": [null, true, "text with spaces", -42]
-    }
-  }
-}
+NOTE: C0 doesn't prescribe content semantics - this demo shows what
+an application-specific encoder might look like.
 
-2. C0 encoded (401 bytes):
-{project:"c0,description:"A human˗readable binary formatǃ,version:"0.1.0,stable:false,downloads:42,rating:4.5,deprecated:null,keywords:["binary:"format:"streaming:"human readable:,empty_string_test:",empty_array_test:[:,config:{debug:true,timeout_ms:30000,ratio:1.5e-3,message:"Hello٫ Worldǃ,features:{escaping:false,utf8:true,nested_arrays:[[1:2::[3:4::,mixed:[null:true:"text with spaces:-42:,,,
+1. Input JSON - C2PA manifest (629 bytes):
+{"jumbf": {"c2pa.manifest.nikon": {"status": "preserved-from-camera"}, "c2pa.manifest.cloudflare": {"claim_generator": "Cloudflare Images", "assertions": [{"label": "c2pa.actions", "data": {"actions": [{"action": "c2pa.resized", "when": "2025-01-10T12:05:00Z", "softwareAgent": "Cloudflare Images", "parameters": {"originalDimensions": {"width": 8256, "height": 5504}, "newDimensions": {"width": 800, "height": 533}}}]}}], "signature_info": {"issuer": "Cloudflare, Inc", "time": "2025-01-10T12:05:00Z", "cert_fingerprint": "fedcba9876543210"}, "claim_metadata": {"claim_id": "cf_resize_123", "parent_claim_id": "nikon_z9_123"}}}}
 
-3. Decoded back to JSON (493 bytes):
-{"project": "c0", "description": "A human-readable binary format!", ...}
+2. Content-aware C0 encoded (503 bytes):
+{jumbf:{c2pa.manifest.nikon:{status:preserved˗from˗camera,,c2pa.manifest.cloudflare:{claim_generator:Cloudflare Images,assertions:[{label:c2pa.actions,data:{actions:[{action:c2pa.resized,when:©¦SGż⁎8·,softwareAgent:Cloudflare Images,parameters:{originalDimensions:{width:8256,height:5504,,newDimensions:{width:800,height:533,,,:,,:,signature_info:{issuer:Cloudflare٫ Inc,time:©¦SGż⁎8·,cert_fingerprint:żŗĴȸvT2Ɣ,,claim_metadata:{claim_id:cf_resize_123,parent_claim_id:nikon_z9_123,,,,
 
-4. Type verification:
-object{11 keys}:
-  "project": "c0"
-  "description": "A human-readabl"
-  "version": "0.1.0"
-  "stable": false
-  "downloads": 42
-  ... and 6 more keys
+   Transformations applied:
+   - Timestamps -> 8-byte nanosecond-epoch binary (pb-encoded)
+   - Cert fingerprint -> raw binary (pb-encoded)
+   - Dimensions -> kept as readable numbers
 
-=== Size: JSON 571 bytes -> C0 401 bytes (70.2%) ===
+3. Decoded back to JSON (629 bytes):
+{"jumbf": {"c2pa.manifest.nikon": {"status": "preserved-from-camera"}, "c2pa.manifest.cloudflare": {"claim_generator": "Cloudflare Images", "assertions": [{"label": "c2pa.actions", "data": {"actions": [{"action": "c2pa.resized", "when": "2025-01-10T12:05:00Z", "softwareAgent": "Cloudflare Images", "parameters": {"originalDimensions": {"width": 8256, "height": 5504}, "newDimensions": {"width": 800, "height": 533}}}]}}], "signature_info": {"issuer": "Cloudflare, Inc", "time": "2025-01-10T12:05:00Z", "cert_fingerprint": "fedcba9876543210"}, "claim_metadata": {"claim_id": "cf_resize_123", "parent_claim_id": "nikon_z9_123"}}}}
+
+   Note: Timestamps decoded with second resolution (nanosecond precision stored)
+
+=== Size: JSON 629 bytes -> C0 503 bytes (80.0%) ===
 
 === Bonus: Printable-Binary Encoding Demo ===
 
@@ -243,9 +221,12 @@ object{11 keys}:
 
    Round-trip proof - decode the pb-encoded JSON:
    Decoded: {"inner": [1, 2, 3], "nested": true}
+
+9. Binary-in-JSON: Inspectable Data Pipeline
+   ...
 ```
 
-Notice how the C0 output remains readable: `human˗readable`, `Hello٫ Worldǃ`. The hyphens, commas, and exclamation marks in string content become distinctive Unicode glyphs (`˗`, `٫`, `ǃ`) while the structural delimiters (`{`, `[`, `,`, `:`) remain as ASCII.
+Notice how the C0 output remains readable: `preserved˗from˗camera`, `Cloudflare٫ Inc`. Hyphens and commas in string content become distinctive Unicode glyphs (`˗`, `٫`) while structural delimiters (`{`, `[`, `,`, `:`) remain as ASCII. String values no longer carry a `"` type prefix — C0 is format-agnostic, with type inference handled by the JSON content layer on decode. The content-aware transforms compress timestamps like `"2025-01-10T12:05:00Z"` (20 chars) into `©¦SGż⁎8·` (8 bytes of nanosecond-precision binary), and hex fingerprints into raw bytes.
 
 ### Binary Demo
 Shows C0 as a container for arbitrary binary data:

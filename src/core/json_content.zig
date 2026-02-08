@@ -1,15 +1,16 @@
 //! JSON Content Encoder/Decoder for C0
 //!
 //! Encodes JSON scalar types into C0 payloads:
-//! - strings: '"' + printable_binary(content) - only content is encoded
-//! - numbers: decimal/scientific notation as-is (no encoding)
-//! - true: literal "true" (no encoding)
-//! - false: literal "false" (no encoding)
-//! - null: literal "null" (no encoding)
+//! - strings: printable_binary(content) (type inferred on decode by exclusion)
+//! - numbers: bare decimal/scientific notation
+//! - true/false/null: literal keywords
+//! - empty string: empty payload
 //!
 //! The C0 structural delimiters (US, RS) mark value boundaries.
 //! Only string content goes through printable_binary encoding.
-//! Type markers (", digits, keywords) stay as raw ASCII.
+//! Type is inferred heuristically on decode: keywords, valid JSON numbers,
+//! then everything else is a string. This means strings like "true", "42",
+//! or "null" will round-trip as their respective JSON types (accepted trade-off).
 
 const std = @import("std");
 const Value = @import("value.zig").Value;
@@ -38,16 +39,6 @@ pub const JsonScalar = struct {
     };
 };
 
-/// Encode a string for C0 payload (prepend quote marker)
-pub fn encodeString(allocator: std.mem.Allocator, content: []const u8) ![]u8 {
-    const result = try allocator.alloc(u8, 1 + content.len);
-    result[0] = '"';
-    if (content.len > 0) {
-        @memcpy(result[1..], content);
-    }
-    return result;
-}
-
 /// Encode a number for C0 payload (pass through as-is)
 pub fn encodeNumber(allocator: std.mem.Allocator, content: []const u8) ![]u8 {
     return try allocator.dupe(u8, content);
@@ -63,16 +54,18 @@ pub fn encodeBoolean(allocator: std.mem.Allocator, value: bool) ![]u8 {
     return try allocator.dupe(u8, if (value) "true" else "false");
 }
 
-/// Decode a C0 payload to determine its JSON type and content
+/// Decode a C0 payload to determine its JSON type and content.
+/// Uses heuristic type inference (no `"` prefix):
+///   1. Empty payload → string (empty content)
+///   2. "null" → null
+///   3. "true" → true
+///   4. "false" → false
+///   5. Valid JSON number → number
+///   6. Everything else → string
 pub fn decodeScalar(payload: []const u8) JsonScalar {
     // Empty payload = empty string
     if (payload.len == 0) {
         return .{ .type = .string, .content = "" };
-    }
-
-    // Starts with quote = string
-    if (payload[0] == '"') {
-        return .{ .type = .string, .content = payload[1..] };
     }
 
     // Exact matches for keywords
@@ -86,17 +79,58 @@ pub fn decodeScalar(payload: []const u8) JsonScalar {
         return .{ .type = .false, .content = "" };
     }
 
-    // Looks like a number? (starts with digit or minus)
-    if (isNumberStart(payload[0])) {
+    // Valid JSON number?
+    if (isValidJsonNumber(payload)) {
         return .{ .type = .number, .content = payload };
     }
 
-    // Default: treat as raw string (backwards compat / binary data)
+    // Everything else is a string (content = full payload, no prefix stripping)
     return .{ .type = .string, .content = payload };
 }
 
-fn isNumberStart(c: u8) bool {
-    return (c >= '0' and c <= '9') or c == '-';
+/// Validate whether a string is a valid JSON number per RFC 8259.
+/// Optional leading `-`, integer part (0 or 1-9 followed by digits),
+/// optional `.` + digits, optional `e`/`E` + optional `+`/`-` + digits.
+/// Must consume the entire string.
+fn isValidJsonNumber(s: []const u8) bool {
+    if (s.len == 0) return false;
+    var i: usize = 0;
+
+    // Optional leading minus
+    if (s[i] == '-') {
+        i += 1;
+        if (i >= s.len) return false;
+    }
+
+    // Integer part
+    if (s[i] == '0') {
+        i += 1;
+    } else if (s[i] >= '1' and s[i] <= '9') {
+        i += 1;
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) {}
+    } else {
+        return false;
+    }
+
+    // Optional fractional part
+    if (i < s.len and s[i] == '.') {
+        i += 1;
+        if (i >= s.len or s[i] < '0' or s[i] > '9') return false;
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) {}
+    }
+
+    // Optional exponent part
+    if (i < s.len and (s[i] == 'e' or s[i] == 'E')) {
+        i += 1;
+        if (i < s.len and (s[i] == '+' or s[i] == '-')) {
+            i += 1;
+        }
+        if (i >= s.len or s[i] < '0' or s[i] > '9') return false;
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) {}
+    }
+
+    // Must have consumed entire string
+    return i == s.len;
 }
 
 // ============================================================================
@@ -485,7 +519,7 @@ pub const ToC0Options = struct {
 };
 
 /// Convert JsonValue to C0 Value (for encoding with encodeRaw)
-/// - Strings: '"' marker (raw) + content (optionally printable_binary encoded)
+/// - Strings: optionally printable_binary encoded content (no type prefix)
 /// - Numbers/booleans/null: raw literals (no encoding)
 /// - Keys: optionally printable_binary encoded
 /// Use encoder.encodeRaw() to write the result (not encode())
@@ -506,26 +540,12 @@ pub fn toC0ValueWithOptions(allocator: std.mem.Allocator, json: JsonValue, optio
             return Value{ .string = try allocator.dupe(u8, n) };
         },
         .string => |s| {
-            // Optionally encode string content with printable_binary, prepend raw quote marker
             if (options.encode_strings) {
                 // Use smart encoding which preserves spaces by default
-                const encoded_content = try enc.encodePayloadSmart(allocator, s, .{});
-                defer allocator.free(encoded_content);
-
-                const result = try allocator.alloc(u8, 1 + encoded_content.len);
-                result[0] = '"';
-                if (encoded_content.len > 0) {
-                    @memcpy(result[1..], encoded_content);
-                }
-                return Value{ .string = result };
+                return Value{ .string = try enc.encodePayloadSmart(allocator, s, .{}) };
             } else {
-                // Raw: just prepend quote marker, content is already safe
-                const result = try allocator.alloc(u8, 1 + s.len);
-                result[0] = '"';
-                if (s.len > 0) {
-                    @memcpy(result[1..], s);
-                }
-                return Value{ .string = result };
+                // Raw: content is already safe, just dupe it
+                return Value{ .string = try allocator.dupe(u8, s) };
             }
         },
         .array => |arr| {
@@ -556,19 +576,18 @@ pub fn toC0ValueWithOptions(allocator: std.mem.Allocator, json: JsonValue, optio
 }
 
 pub const FromC0Options = struct {
-    /// Decode string content with printable_binary (default: false)
-    /// JSON strings may contain intentionally pb-encoded content that should stay as-is
-    decode_strings: bool = false,
-    /// Decode keys with printable_binary (default: false)
-    /// Keys are typically plain ASCII identifiers
-    decode_keys: bool = false,
+    /// Decode string content with printable_binary (default: true)
+    /// Ensures pb-encoded punctuation round-trips correctly
+    decode_strings: bool = true,
+    /// Decode keys with printable_binary (default: true)
+    /// Ensures pb-encoded key content round-trips correctly
+    decode_keys: bool = true,
 };
 
 /// Convert C0 Value to JsonValue (for decoding)
-/// - Strings: strip '"' marker, keep content as-is (pb glyphs preserved)
-/// - Numbers/booleans/null: parse as-is
-/// - Keys: keep as-is (no decoding)
-/// Note: pb-encoded content in strings is preserved, not decoded
+/// - Strings: heuristic type inference, then optionally pb-decode content
+/// - Numbers/booleans/null: parsed from literal keywords/valid numbers
+/// - Keys: optionally pb-decoded
 pub fn fromC0Value(allocator: std.mem.Allocator, val: Value) !JsonValue {
     return fromC0ValueWithOptions(allocator, val, .{});
 }
@@ -645,34 +664,30 @@ pub fn freeC0Value(allocator: std.mem.Allocator, val: Value) void {
 // Tests
 // ============================================================================
 
-test "scalar encoding - string" {
-    const allocator = std.testing.allocator;
-
-    const encoded = try encodeString(allocator, "hello");
-    defer allocator.free(encoded);
-
-    try std.testing.expectEqualStrings("\"hello", encoded);
-}
-
-test "scalar encoding - empty string" {
-    const allocator = std.testing.allocator;
-
-    const encoded = try encodeString(allocator, "");
-    defer allocator.free(encoded);
-
-    try std.testing.expectEqualStrings("\"", encoded);
-}
-
 test "scalar decoding - string" {
-    const scalar = decodeScalar("\"hello");
+    const scalar = decodeScalar("hello");
     try std.testing.expectEqual(JsonScalar.ScalarType.string, scalar.type);
     try std.testing.expectEqualStrings("hello", scalar.content);
 }
 
 test "scalar decoding - empty string" {
-    const scalar = decodeScalar("\"");
+    const scalar = decodeScalar("");
     try std.testing.expectEqual(JsonScalar.ScalarType.string, scalar.type);
     try std.testing.expectEqualStrings("", scalar.content);
+}
+
+test "scalar decoding - string that looks like number prefix but isn't valid" {
+    // "-" alone is not a valid JSON number
+    const scalar = decodeScalar("-");
+    try std.testing.expectEqual(JsonScalar.ScalarType.string, scalar.type);
+    try std.testing.expectEqualStrings("-", scalar.content);
+}
+
+test "scalar decoding - string with leading zero is not a number" {
+    // "01" is not a valid JSON number (no leading zeros except bare 0)
+    const scalar = decodeScalar("01");
+    try std.testing.expectEqual(JsonScalar.ScalarType.string, scalar.type);
+    try std.testing.expectEqualStrings("01", scalar.content);
 }
 
 test "scalar decoding - null" {
@@ -860,18 +875,21 @@ test "JSON -> C0 -> JSON round-trip with types" {
     }
 }
 
-test "empty string round-trip" {
+test "empty string as standalone scalar round-trip" {
     const allocator = std.testing.allocator;
     const encoder = @import("encoder.zig");
     const decoder = @import("decoder.zig");
 
-    // Parse JSON with empty string
-    const json_val = try parseJson(allocator, "[\"\"]");
-    defer freeJsonValue(allocator, json_val);
+    // Standalone empty string (not inside an array) round-trips correctly
+    const json_val = JsonValue{ .string = "" };
 
     // Convert to C0
     const c0_val = try toC0Value(allocator, json_val);
     defer freeC0Value(allocator, c0_val);
+
+    // The C0 value should be an empty string payload
+    try std.testing.expect(c0_val == .string);
+    try std.testing.expectEqualStrings("", c0_val.string);
 
     // Encode
     const c0_bytes = try encoder.encodeRaw(allocator, c0_val);
@@ -885,12 +903,16 @@ test "empty string round-trip" {
     const decoded_json = try fromC0Value(allocator, decoded_c0);
     defer freeJsonValue(allocator, decoded_json);
 
-    // Verify
-    try std.testing.expect(decoded_json == .array);
-    try std.testing.expectEqual(@as(usize, 1), decoded_json.array.len);
-    try std.testing.expect(decoded_json.array[0] == .string);
-    try std.testing.expectEqualStrings("", decoded_json.array[0].string);
+    // Empty payload decodes as empty string
+    try std.testing.expect(decoded_json == .string);
+    try std.testing.expectEqualStrings("", decoded_json.string);
 }
+
+// NOTE: [""] (array containing empty string) does NOT round-trip through C0.
+// Empty string payload in an array is indistinguishable from an empty array
+// at the C0 format level (both encode as GS US). This is a known limitation
+// documented in roundtrip_test.zig. Applications needing to preserve empty
+// strings in arrays should use a content-aware encoding layer.
 
 test "raw mode: pre-encoded data passes through unchanged" {
     const allocator = std.testing.allocator;
@@ -911,10 +933,9 @@ test "raw mode: pre-encoded data passes through unchanged" {
     });
     defer freeC0Value(allocator, c0_val);
 
-    // The C0 value should have the quote marker + raw content
+    // The C0 value should be the raw content (no quote marker)
     try std.testing.expect(c0_val == .string);
-    try std.testing.expect(c0_val.string[0] == '"');
-    try std.testing.expectEqualStrings(pre_encoded, c0_val.string[1..]);
+    try std.testing.expectEqualStrings(pre_encoded, c0_val.string);
 
     // Encode to bytes
     const c0_bytes = try encoder.encodeRaw(allocator, c0_val);
