@@ -226,7 +226,7 @@ an application-specific encoder might look like.
    ...
 ```
 
-Notice how the C0 output remains readable: `preserved˗from˗camera`, `Cloudflare٫ Inc`. Hyphens and commas in string content become distinctive Unicode glyphs (`˗`, `٫`) while structural delimiters (`{`, `[`, `,`, `:`) remain as ASCII. String values no longer carry a `"` type prefix — C0 is format-agnostic, with type inference handled by the JSON content layer on decode. The content-aware transforms compress timestamps like `"2025-01-10T12:05:00Z"` (20 chars) into `©¦SGż⁎8·` (8 bytes of nanosecond-precision binary), and hex fingerprints into raw bytes.
+Notice how the C0 output remains readable: `preserved˗from˗camera`, `Cloudflare٫ Inc`. Hyphens and commas in string content become distinctive Unicode glyphs (`˗`, `٫`) while structural delimiters (`{`, `[`, `,`, `:`) remain as ASCII. C0 is format-agnostic — type inference is handled by the JSON content layer on decode. The content-aware transforms compress timestamps like `"2025-01-10T12:05:00Z"` (20 chars) into `©¦SGż⁎8·` (8 glyphs, 14 UTF-8 bytes encoding 8 bytes of nanosecond-epoch binary) — smaller, still copy-pastable, and actually *more* precise than the original ISO 8601 string, if you're willing to trade human-readability for compactness. Hex fingerprints similarly become raw binary glyphs.
 
 ### Binary Demo
 Shows C0 as a container for arbitrary binary data:
@@ -247,7 +247,40 @@ Binary blob                  16         36         24
 Mixed data                   32         44         44
 ```
 
-Note: ASCII text (41 bytes) is now smaller than base64 (52 bytes) because spaces pass through unchanged!
+### PNG Destructuring Demo
+Proves C0 can losslessly destructure and reconstruct a real binary file format:
+```bash
+zig build run-png-demo -- path/to/image.png
+```
+
+Sample output:
+```
+=== C0 PNG Destructuring Demo ===
+
+File: new_record_1h39m.png
+Size: 13838 bytes
+Chunks: 6
+
+Chunk layout:
+  IHDR      13 bytes
+  iCCP     330 bytes
+  eXIf      86 bytes
+  iTXt     469 bytes
+  IDAT   12860 bytes
+  IEND       0 bytes
+
+IHDR: 354x87, 8-bit RGBA
+
+C0 snippet (first 200 bytes):
+{signature:ɃPNG⏎¶Ƶ¶,chunks:[{type:IHDR,data:··¯b···W⌫¡···,crc:˃ȡOǑ,:{type:iCCP,data:ICC Profile··...
+
+=== Round-Trip Verification ===
+Original:    13838 bytes
+Reassembled: 13838 bytes
+Byte-for-byte match: true
+```
+
+The PNG is destructured into its chunks as a C0 object. Chunk type names (`IHDR`, `iCCP`, `IDAT`, etc.) remain readable as ASCII, while binary payloads become printable-binary glyphs. The entire C0 text is valid UTF-8 that can be stored in text fields, logged, or piped through text tools. Decoding and reassembling produces the identical PNG byte-for-byte.
 
 ## Dependencies
 

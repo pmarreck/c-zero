@@ -160,4 +160,39 @@ pub fn build(b: *std.Build) void {
     });
     const run_binary_demo_tests = b.addRunArtifact(binary_demo_tests);
     test_step.dependOn(&run_binary_demo_tests.step);
+
+    // PNG demo executable
+    const png_demo = b.addExecutable(.{
+        .name = "png_demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/png_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "c0_core", .module = core_mod },
+            },
+        }),
+    });
+    b.installArtifact(png_demo);
+
+    const run_png_demo = b.addRunArtifact(png_demo);
+    if (b.args) |args| {
+        run_png_demo.addArgs(args);
+    }
+    const run_png_demo_step = b.step("run-png-demo", "Run the PNG destructuring demo");
+    run_png_demo_step.dependOn(&run_png_demo.step);
+
+    // PNG demo tests
+    const png_demo_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/png_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "c0_core", .module = core_mod },
+            },
+        }),
+    });
+    const run_png_demo_tests = b.addRunArtifact(png_demo_tests);
+    test_step.dependOn(&run_png_demo_tests.step);
 }
