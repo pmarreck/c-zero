@@ -339,6 +339,7 @@ pub const C0CodecInfo = extern struct {
 /// codec_name: NULL for auto-detect
 /// filename: NULL if unknown, used for extension matching
 /// faithful: 1=faithful, 0=editable
+/// pretty: 1=pretty-print with tabs/newlines, 0=compact
 export fn c0_codec_expand(
     arena: ?*C0Arena,
     codec_name: ?[*]const u8,
@@ -348,6 +349,7 @@ export fn c0_codec_expand(
     data: ?[*]const u8,
     len: usize,
     faithful: c_int,
+    pretty: c_int,
     out_len: ?*usize,
 ) ?[*]u8 {
     const a = arena orelse return null;
@@ -372,7 +374,9 @@ export fn c0_codec_expand(
     const value = found_codec.expand(allocator, d[0..len], options) catch return null;
 
     // Encode Value to C0 text
-    const c0_bytes = core.encode(allocator, value) catch return null;
+    const c0_bytes = core.encodeWithOptions(allocator, value, .{
+        .pretty = pretty != 0,
+    }) catch return null;
 
     if (out_len) |lp| {
         lp.* = c0_bytes.len;

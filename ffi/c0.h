@@ -86,12 +86,14 @@ C0Value* c0_decode(C0Arena* arena, const uint8_t* data, size_t len);
  *  codec_name: NULL for auto-detect (pass codec_name_len=0)
  *  filename: NULL if unknown, used for extension matching (pass filename_len=0)
  *  faithful: 1=faithful (bit-perfect), 0=editable (recalculate derived fields)
+ *  pretty: 1=pretty-print with tabs/newlines, 0=compact
  *  Returns C0-encoded text, or NULL on failure */
 uint8_t* c0_codec_expand(C0Arena* arena,
     const char* codec_name, size_t codec_name_len,
     const char* filename, size_t filename_len,
     const uint8_t* data, size_t len,
     int faithful,
+    int pretty,
     size_t* out_len);
 
 /** Collapse: C0 text -> file bytes

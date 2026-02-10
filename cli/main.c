@@ -308,6 +308,7 @@ static void print_usage(const char* program_name) {
     fprintf(stderr, "Expand/Collapse options:\n");
     fprintf(stderr, "  --codec <name>      Use specific codec (default: auto-detect)\n");
     fprintf(stderr, "  --editable          Editable mode (omit/recalculate derived fields)\n");
+    fprintf(stderr, "  --compact           Compact output (no pretty-printing, expand only)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -h, --help          Show this help message\n");
@@ -513,12 +514,13 @@ static int cmd_decode(void) {
 
 /**
  * Expand command: read binary file, expand via codec to C0 text on stdout
- * Usage: c0 expand [--codec name] [--editable] <file>
+ * Usage: c0 expand [--codec name] [--editable] [--compact] <file>
  */
 static int cmd_expand(int argc, char* argv[]) {
     const char* codec_name = NULL;
     size_t codec_name_len = 0;
     int faithful = 1;
+    int pretty = 1; /* pretty-print by default */
     const char* filepath = NULL;
 
     /* Parse arguments after "expand" */
@@ -532,6 +534,8 @@ static int cmd_expand(int argc, char* argv[]) {
             codec_name_len = strlen(codec_name);
         } else if (strcmp(argv[i], "--editable") == 0) {
             faithful = 0;
+        } else if (strcmp(argv[i], "--compact") == 0) {
+            pretty = 0;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
             return 1;
@@ -566,6 +570,7 @@ static int cmd_expand(int argc, char* argv[]) {
         filepath, strlen(filepath),
         (const uint8_t*)data, data_len,
         faithful,
+        pretty,
         &c0_len);
 
     if (!c0_data) {

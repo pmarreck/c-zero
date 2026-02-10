@@ -23,6 +23,8 @@ pub const decodePayload = encoding.decodePayload;
 
 pub const encoder = @import("encoder.zig");
 pub const encode = encoder.encode;
+pub const encodeWithOptions = encoder.encodeWithOptions;
+pub const EncodeOptions = encoder.EncodeOptions;
 pub const encodeRaw = encoder.encodeRaw;
 
 pub const decoder = @import("decoder.zig");
