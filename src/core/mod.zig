@@ -7,6 +7,13 @@ pub const Value = value.Value;
 pub const Entry = value.Entry;
 
 pub const encoding = @import("encoding.zig");
+pub const OBJECT_OPEN = encoding.OBJECT_OPEN;
+pub const OBJECT_CLOSE = encoding.OBJECT_CLOSE;
+pub const ARRAY_OPEN = encoding.ARRAY_OPEN;
+pub const ARRAY_CLOSE = encoding.ARRAY_CLOSE;
+pub const COMMA = encoding.COMMA;
+pub const COLON = encoding.COLON;
+/// Legacy aliases (deprecated)
 pub const FS = encoding.FS;
 pub const GS = encoding.GS;
 pub const RS = encoding.RS;

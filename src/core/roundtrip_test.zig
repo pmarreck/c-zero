@@ -44,7 +44,7 @@ test "round-trip: simple string" {
 
 test "round-trip: string with special bytes (0x1C-0x1F)" {
     const allocator = std.testing.allocator;
-    // These are the structural C0 control characters that need escaping
+    // These are old C0 control characters — still need pb-encoding as control chars
     const val = Value{ .string = "before\x1C\x1D\x1E\x1Fafter" };
     try roundTrip(allocator, val);
 }
@@ -113,22 +113,32 @@ test "round-trip: array with multiple strings" {
     try roundTrip(allocator, val);
 }
 
-// NOTE: This test documents a known format ambiguity.
-// Arrays with empty strings encode identically to shorter arrays or empty arrays.
-// For example, ["", "", ""] encodes as GS US US US, which decodes as an empty array [].
-// This is a fundamental limitation of the C0 format's use of empty payloads.
-// TODO: Consider format revision to distinguish empty strings (e.g., explicit empty marker)
-//
-// test "round-trip: array with empty strings" {
-//     const allocator = std.testing.allocator;
-//     const items = [_]Value{
-//         .{ .string = "" },
-//         .{ .string = "" },
-//         .{ .string = "" },
-//     };
-//     const val = Value{ .array = &items };
-//     try roundTrip(allocator, val);
-// }
+// NOTE: With bracket-style format, arrays with 2+ empty strings round-trip correctly.
+// ["","",""] encodes as "[,,]" which decodes back to 3 empty strings.
+// ["",""] encodes as "[,]" which also round-trips.
+// The single remaining ambiguity: [""] encodes as "[]" which decodes as an empty array.
+// This is a fundamental limitation — a single empty string in an array can't be
+// distinguished from an empty array.
+test "round-trip: array with empty strings (3)" {
+    const allocator = std.testing.allocator;
+    const items = [_]Value{
+        .{ .string = "" },
+        .{ .string = "" },
+        .{ .string = "" },
+    };
+    const val = Value{ .array = &items };
+    try roundTrip(allocator, val);
+}
+
+test "round-trip: array with empty strings (2)" {
+    const allocator = std.testing.allocator;
+    const items = [_]Value{
+        .{ .string = "" },
+        .{ .string = "" },
+    };
+    const val = Value{ .array = &items };
+    try roundTrip(allocator, val);
+}
 
 test "round-trip: array with special bytes in strings" {
     const allocator = std.testing.allocator;

@@ -55,6 +55,18 @@ echo "hello world" | ./zig-out/bin/c0 encode
 echo "hello world" | ./zig-out/bin/c0 encode | ./zig-out/bin/c0 decode
 # Output: "hello world"
 
+# Expand a binary file to human-readable C0 text
+c0 expand image.png > image.c0
+
+# Collapse C0 text back to the original binary format
+c0 collapse image.c0 > roundtrip.png
+
+# Editable mode (omits derived fields like CRC, recalculates on collapse)
+c0 expand --editable image.png | c0 collapse --editable > edited.png
+
+# List available codecs
+c0 codecs
+
 # Run the demos
 zig build run-json-demo      # JSON <-> C0 conversion
 zig build run-binary-demo    # Binary data container demo
@@ -87,6 +99,7 @@ nix develop -c zig build -Doptimize=ReleaseFast
 C0 uses a hexagonal architecture:
 
 - **Core** (`src/core/`) - Pure Zig encode/decode logic with no I/O
+- **Codec** (`src/codec/`) - Plugin system for binary format expansion/collapse
 - **FFI** (`ffi/`) - Arena-based C API for external consumers
 - **CLI** (`cli/`) - C command-line tool using FFI
 
@@ -156,6 +169,70 @@ The "PNG" and "Hello from binary!" parts remain readable, while control bytes be
 3. **Network debugging** - Capture packets in human-readable format
 4. **Data archives** - Bundle files with readable metadata
 5. **JSON alternative** - When you need binary support without base64
+
+## Codec System
+
+C0 includes a codec plugin architecture that transforms binary file formats into human-readable, editable C0 text — and back again with lossless round-trips.
+
+### Built-in Codecs
+
+| Codec | Extensions | Modes | Description |
+|-------|-----------|-------|-------------|
+| `png` | `.png` | faithful, editable | PNG image format (lossless chunk destructuring) |
+| `bg3` | `.lsv`, `.pak`, `.lsf` | faithful | Baldur's Gate 3 save files (LSPK packages and LSF data) |
+
+### Expand / Collapse
+
+**Expand** converts a binary file into C0 text:
+```bash
+c0 expand image.png
+# Output: {format:png,signature:ɃPNG⏎¶Ƶ¶,chunks:[{type:IHDR,data:...
+```
+
+**Collapse** converts C0 text back to the native format:
+```bash
+c0 expand image.png | c0 collapse > roundtrip.png
+# roundtrip.png is byte-identical to image.png
+```
+
+Every codec embeds a `format` key in its C0 output, making the data self-describing. On collapse, the codec is inferred from this field automatically.
+
+### Faithful vs Editable Mode
+
+- **Faithful** (default): Preserves all fields for bit-perfect round-trips. CRCs, checksums, and derived fields are stored as-is.
+- **Editable** (`--editable`): Omits derived fields (like CRC). On collapse, they are recalculated. This lets you edit chunk data without manually fixing checksums.
+
+```bash
+# Edit a PNG: expand in editable mode, modify the C0 text, collapse back
+c0 expand --editable image.png > image.c0
+# ... edit image.c0 ...
+c0 collapse --editable image.c0 > modified.png
+```
+
+### Auto-Detection
+
+Codecs are matched by magic bytes first, then by file extension:
+```bash
+c0 expand myfile.png          # auto-detected from magic bytes
+c0 expand --codec png myfile  # explicit codec selection
+```
+
+### External Codecs (Subprocess Protocol)
+
+You can extend C0 with your own codecs. Place an executable named `c0-codec-<name>` in `~/.c0/codecs/` or anywhere on your `PATH`. It must support three subcommands:
+
+```bash
+c0-codec-myformat info                 # Print codec metadata as C0 to stdout
+c0-codec-myformat expand [--editable]  # stdin: raw bytes -> stdout: C0 text
+c0-codec-myformat collapse [--editable] # stdin: C0 text -> stdout: raw bytes
+```
+
+The `info` subcommand outputs C0-formatted metadata:
+```
+{name:myformat,description:My custom format,extensions:[.myf:,supports_faithful:true,supports_editable:true,
+```
+
+Built-in codecs always take priority over subprocess codecs with the same name. Subprocess codecs are discovered automatically and listed by `c0 codecs`.
 
 ## Demos
 

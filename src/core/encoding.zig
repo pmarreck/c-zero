@@ -11,16 +11,26 @@ const pb = @import("printable_binary");
 
 /// Structural delimiter constants (printable ASCII characters)
 /// These characters are ALL escaped by printable_binary when they appear in payload data:
-///   { → ❴, [ → ⟦, , → ٫, : → ꞉
+///   { → ❴, } → ❵, [ → ⟦, ] → ⟧, , → ٫, : → ꞉
 /// This ensures no ambiguity: delimiters in data get escaped, structural delimiters don't.
-pub const FS: u8 = '{'; // begins object
-pub const GS: u8 = '['; // begins array
-pub const RS: u8 = ','; // terminates object entry
-pub const US: u8 = ':'; // terminates array element / separates key from value
+pub const OBJECT_OPEN: u8 = '{';
+pub const OBJECT_CLOSE: u8 = '}';
+pub const ARRAY_OPEN: u8 = '[';
+pub const ARRAY_CLOSE: u8 = ']';
+pub const COMMA: u8 = ',';
+pub const COLON: u8 = ':';
+
+/// Legacy aliases (deprecated — use the named constants above)
+pub const FS: u8 = OBJECT_OPEN;
+pub const GS: u8 = ARRAY_OPEN;
+pub const RS: u8 = COMMA;
+pub const US: u8 = COLON;
 
 /// Check if a byte is a structural delimiter
 pub fn isStructural(byte: u8) bool {
-    return byte == FS or byte == GS or byte == RS or byte == US;
+    return byte == OBJECT_OPEN or byte == OBJECT_CLOSE or
+        byte == ARRAY_OPEN or byte == ARRAY_CLOSE or
+        byte == COMMA or byte == COLON;
 }
 
 /// Options for smart payload encoding
@@ -64,7 +74,7 @@ fn isControlChar(byte: u8, options: EncodePayloadOptions) bool {
 
 /// Check if data needs printable-binary encoding
 /// Returns true if:
-/// - Contains structural delimiters ({, [, ,, :)
+/// - Contains structural delimiters ({, }, [, ], ,, :)
 /// - Contains control characters or required whitespace
 /// - Is not valid UTF-8
 pub fn needsEncoding(data: []const u8, options: EncodePayloadOptions) bool {
@@ -152,18 +162,20 @@ pub fn decodePayload(allocator: std.mem.Allocator, encoded: []const u8) ![]u8 {
 }
 
 test "structural byte detection" {
-    try std.testing.expect(isStructural(FS));
-    try std.testing.expect(isStructural(GS));
-    try std.testing.expect(isStructural(RS));
-    try std.testing.expect(isStructural(US));
+    try std.testing.expect(isStructural(OBJECT_OPEN));
+    try std.testing.expect(isStructural(OBJECT_CLOSE));
+    try std.testing.expect(isStructural(ARRAY_OPEN));
+    try std.testing.expect(isStructural(ARRAY_CLOSE));
+    try std.testing.expect(isStructural(COMMA));
+    try std.testing.expect(isStructural(COLON));
     try std.testing.expect(isStructural('{'));
+    try std.testing.expect(isStructural('}'));
     try std.testing.expect(isStructural('['));
+    try std.testing.expect(isStructural(']'));
     try std.testing.expect(isStructural(','));
     try std.testing.expect(isStructural(':'));
     try std.testing.expect(!isStructural('a'));
     try std.testing.expect(!isStructural(0x00));
-    try std.testing.expect(!isStructural('}'));
-    try std.testing.expect(!isStructural(']'));
     try std.testing.expect(!isStructural(';'));
 }
 
@@ -184,7 +196,7 @@ test "encodePayload never produces structural bytes" {
     }
 
     // Also test that the delimiter characters themselves get encoded safely
-    const delimiter_bytes = [_]u8{ FS, GS, RS, US };
+    const delimiter_bytes = [_]u8{ OBJECT_OPEN, OBJECT_CLOSE, ARRAY_OPEN, ARRAY_CLOSE, COMMA, COLON };
     const encoded = try encodePayload(allocator, &delimiter_bytes);
     defer allocator.free(encoded);
 
@@ -209,7 +221,9 @@ test "payload round-trip" {
 
 test "needsEncoding detects structural delimiters" {
     try std.testing.expect(needsEncoding("{hello}", .{}));
+    try std.testing.expect(needsEncoding("close}", .{}));
     try std.testing.expect(needsEncoding("[array]", .{}));
+    try std.testing.expect(needsEncoding("close]", .{}));
     try std.testing.expect(needsEncoding("a,b,c", .{}));
     try std.testing.expect(needsEncoding("key:value", .{}));
     try std.testing.expect(!needsEncoding("hello world", .{ .allow_spaces = true }));

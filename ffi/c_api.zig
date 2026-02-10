@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const core = @import("c0_core");
+const codec_mod = @import("c0_codec");
 
 // ============================================================================
 // Error Codes (must match c0.h)
@@ -18,6 +19,8 @@ pub const C0Error = enum(c_int) {
     C0_ERR_INVALID_TYPE = 3,
     C0_ERR_DECODE_FAILED = 4,
     C0_ERR_INDEX_OUT_OF_BOUNDS = 5,
+    C0_ERR_CODEC_FAILED = 6,
+    C0_ERR_UNKNOWN_CODEC = 7,
 };
 
 // ============================================================================
@@ -316,6 +319,152 @@ export fn c0_decode(arena: ?*C0Arena, data: ?[*]const u8, len: usize) ?*C0Value 
     const wrapper = allocator.create(C0Value) catch return null;
     wrapper.* = coreToC0Value(state, allocator, decoded) catch return null;
     return wrapper;
+}
+
+// ============================================================================
+// Codec Operations
+// ============================================================================
+
+/// C-compatible codec info struct
+pub const C0CodecInfo = extern struct {
+    name: [*]const u8,
+    name_len: usize,
+    description: [*]const u8,
+    description_len: usize,
+    supports_faithful: c_int,
+    supports_editable: c_int,
+};
+
+/// Expand: file bytes -> C0 text
+/// codec_name: NULL for auto-detect
+/// filename: NULL if unknown, used for extension matching
+/// faithful: 1=faithful, 0=editable
+export fn c0_codec_expand(
+    arena: ?*C0Arena,
+    codec_name: ?[*]const u8,
+    codec_name_len: usize,
+    filename: ?[*]const u8,
+    filename_len: usize,
+    data: ?[*]const u8,
+    len: usize,
+    faithful: c_int,
+    out_len: ?*usize,
+) ?[*]u8 {
+    const a = arena orelse return null;
+    const d = data orelse return null;
+    const state = a.toInternal();
+    const allocator = state.allocator();
+    const registry = codec_mod.builtin_registry;
+
+    // Find codec
+    const found_codec = blk: {
+        if (codec_name) |cn| {
+            break :blk registry.findByName(cn[0..codec_name_len]);
+        } else {
+            const fname: ?[]const u8 = if (filename) |f| f[0..filename_len] else null;
+            break :blk registry.detect(fname, d[0..len]);
+        }
+    } orelse return null;
+
+    const options = codec_mod.CodecOptions{ .faithful = faithful != 0 };
+
+    // Expand to Value
+    const value = found_codec.expand(allocator, d[0..len], options) catch return null;
+
+    // Encode Value to C0 text
+    const c0_bytes = core.encode(allocator, value) catch return null;
+
+    if (out_len) |lp| {
+        lp.* = c0_bytes.len;
+    }
+    return c0_bytes.ptr;
+}
+
+/// Collapse: C0 text -> file bytes
+/// codec_name: NULL = infer from C0 "format" field
+/// faithful: 1=faithful, 0=editable
+export fn c0_codec_collapse(
+    arena: ?*C0Arena,
+    codec_name: ?[*]const u8,
+    codec_name_len: usize,
+    c0_data: ?[*]const u8,
+    c0_len: usize,
+    faithful: c_int,
+    out_len: ?*usize,
+) ?[*]u8 {
+    const a = arena orelse return null;
+    const d = c0_data orelse return null;
+    const state = a.toInternal();
+    const allocator = state.allocator();
+    const registry = codec_mod.builtin_registry;
+
+    // Decode C0 text to Value
+    const value = core.decode(allocator, d[0..c0_len]) catch return null;
+
+    // Find codec
+    const found_codec = blk: {
+        if (codec_name) |cn| {
+            break :blk registry.findByName(cn[0..codec_name_len]);
+        } else {
+            // Infer from the "format" field in the decoded value
+            break :blk registry.findByFormatField(value);
+        }
+    } orelse return null;
+
+    const options = codec_mod.CodecOptions{ .faithful = faithful != 0 };
+
+    // Collapse Value to native bytes
+    const native_bytes = found_codec.collapse(allocator, value, options) catch return null;
+
+    if (out_len) |lp| {
+        lp.* = native_bytes.len;
+    }
+    return native_bytes.ptr;
+}
+
+/// Detect codec from file data and optional filename
+/// Returns codec name or NULL if not detected
+export fn c0_codec_detect(
+    data: ?[*]const u8,
+    len: usize,
+    filename: ?[*]const u8,
+    filename_len: usize,
+) ?[*]const u8 {
+    const d = data orelse return null;
+    const registry = codec_mod.builtin_registry;
+    const fname: ?[]const u8 = if (filename) |f| f[0..filename_len] else null;
+
+    const found = registry.detect(fname, d[0..len]) orelse return null;
+    return found.info().name.ptr;
+}
+
+/// Get number of available codecs
+export fn c0_codec_count() usize {
+    return codec_mod.builtin_registry.codecs.len;
+}
+
+/// Get info for codec at index
+export fn c0_codec_info(index: usize) C0CodecInfo {
+    const registry = codec_mod.builtin_registry;
+    if (index >= registry.codecs.len) {
+        return .{
+            .name = "",
+            .name_len = 0,
+            .description = "",
+            .description_len = 0,
+            .supports_faithful = 0,
+            .supports_editable = 0,
+        };
+    }
+    const info = registry.codecs[index].info();
+    return .{
+        .name = info.name.ptr,
+        .name_len = info.name.len,
+        .description = info.description.ptr,
+        .description_len = info.description.len,
+        .supports_faithful = if (info.supports_faithful) 1 else 0,
+        .supports_editable = if (info.supports_editable) 1 else 0,
+    };
 }
 
 // ============================================================================

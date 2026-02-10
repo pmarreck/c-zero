@@ -21,6 +21,38 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    // Codec module (with LZ4 C dependency for BG3 codec)
+    const codec_mod = b.addModule("c0_codec", .{
+        .root_source_file = b.path("src/codec/mod.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "c0_core", .module = core_mod },
+        },
+    });
+    codec_mod.addIncludePath(b.path("lib/lz4"));
+    codec_mod.addCSourceFile(.{
+        .file = b.path("lib/lz4/lz4.c"),
+        .flags = &.{"-std=c99"},
+    });
+    codec_mod.addCSourceFile(.{
+        .file = b.path("lib/lz4/lz4frame.c"),
+        .flags = &.{"-std=c99"},
+    });
+    codec_mod.addCSourceFile(.{
+        .file = b.path("lib/lz4/xxhash.c"),
+        .flags = &.{"-std=c99"},
+    });
+    codec_mod.addCSourceFile(.{
+        .file = b.path("lib/lz4/lz4hc.c"),
+        .flags = &.{"-std=c99"},
+    });
+    codec_mod.addIncludePath(b.path("lib/zstd"));
+    codec_mod.addCSourceFile(.{
+        .file = b.path("lib/zstd/zstd.c"),
+        .flags = &.{"-std=c99"},
+    });
+
     // FFI module
     const ffi_mod = b.addModule("c0_ffi", .{
         .root_source_file = b.path("ffi/c_api.zig"),
@@ -28,6 +60,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "c0_core", .module = core_mod },
+            .{ .name = "c0_codec", .module = codec_mod },
         },
     });
 
@@ -41,6 +74,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "c0_core", .module = core_mod },
+                .{ .name = "c0_codec", .module = codec_mod },
             },
         }),
     });
@@ -84,16 +118,54 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "c0_core", .module = core_mod },
+                .{ .name = "c0_codec", .module = codec_mod },
             },
         }),
     });
 
+    // Codec tests
+    const codec_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/codec/mod.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "c0_core", .module = core_mod },
+        },
+    });
+    codec_test_mod.addIncludePath(b.path("lib/lz4"));
+    codec_test_mod.addCSourceFile(.{
+        .file = b.path("lib/lz4/lz4.c"),
+        .flags = &.{"-std=c99"},
+    });
+    codec_test_mod.addCSourceFile(.{
+        .file = b.path("lib/lz4/lz4frame.c"),
+        .flags = &.{"-std=c99"},
+    });
+    codec_test_mod.addCSourceFile(.{
+        .file = b.path("lib/lz4/xxhash.c"),
+        .flags = &.{"-std=c99"},
+    });
+    codec_test_mod.addCSourceFile(.{
+        .file = b.path("lib/lz4/lz4hc.c"),
+        .flags = &.{"-std=c99"},
+    });
+    codec_test_mod.addIncludePath(b.path("lib/zstd"));
+    codec_test_mod.addCSourceFile(.{
+        .file = b.path("lib/zstd/zstd.c"),
+        .flags = &.{"-std=c99"},
+    });
+    const codec_tests = b.addTest(.{
+        .root_module = codec_test_mod,
+    });
+
     const run_core_tests = b.addRunArtifact(core_tests);
     const run_ffi_tests = b.addRunArtifact(ffi_tests);
+    const run_codec_tests = b.addRunArtifact(codec_tests);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_core_tests.step);
     test_step.dependOn(&run_ffi_tests.step);
+    test_step.dependOn(&run_codec_tests.step);
 
     _ = ffi_mod;
 

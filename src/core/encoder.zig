@@ -71,19 +71,17 @@ fn encodeValue(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), v
             }
         },
         .array => |arr| {
-            try out.append(allocator, enc.GS);
-            for (arr) |item| {
+            try out.append(allocator, enc.ARRAY_OPEN);
+            for (arr, 0..) |item, i| {
+                if (i > 0) try out.append(allocator, enc.COMMA);
                 try encodeValue(allocator, out, item, mode);
-                try out.append(allocator, enc.US);
             }
-            // Empty array still needs trailing US (spec: GS US)
-            if (arr.len == 0) {
-                try out.append(allocator, enc.US);
-            }
+            try out.append(allocator, enc.ARRAY_CLOSE);
         },
         .object => |obj| {
-            try out.append(allocator, enc.FS);
-            for (obj) |entry| {
+            try out.append(allocator, enc.OBJECT_OPEN);
+            for (obj, 0..) |entry, i| {
+                if (i > 0) try out.append(allocator, enc.COMMA);
                 // Key
                 switch (mode) {
                     .smart => |opts| {
@@ -95,15 +93,11 @@ fn encodeValue(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), v
                         try out.appendSlice(allocator, entry.key);
                     },
                 }
-                try out.append(allocator, enc.US);
+                try out.append(allocator, enc.COLON);
                 // Value
                 try encodeValue(allocator, out, entry.value, mode);
-                try out.append(allocator, enc.RS);
             }
-            // Empty object still needs trailing RS (spec: FS RS)
-            if (obj.len == 0) {
-                try out.append(allocator, enc.RS);
-            }
+            try out.append(allocator, enc.OBJECT_CLOSE);
         },
     }
 }
@@ -137,10 +131,10 @@ test "encode empty array" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // Empty array = GS US = "[:"
+    // Empty array = "[]"
     try std.testing.expectEqual(@as(usize, 2), result.len);
-    try std.testing.expectEqual(enc.GS, result[0]);
-    try std.testing.expectEqual(enc.US, result[1]);
+    try std.testing.expectEqual(enc.ARRAY_OPEN, result[0]);
+    try std.testing.expectEqual(enc.ARRAY_CLOSE, result[1]);
 }
 
 test "encode array with strings" {
@@ -154,13 +148,9 @@ test "encode array with strings" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // GS "a" US "b" US = "[a:b:" = 5 bytes
+    // "[a,b]" = 5 bytes
     try std.testing.expectEqual(@as(usize, 5), result.len);
-    try std.testing.expectEqual(enc.GS, result[0]);
-    try std.testing.expectEqual(@as(u8, 'a'), result[1]);
-    try std.testing.expectEqual(enc.US, result[2]);
-    try std.testing.expectEqual(@as(u8, 'b'), result[3]);
-    try std.testing.expectEqual(enc.US, result[4]);
+    try std.testing.expectEqualStrings("[a,b]", result);
 }
 
 test "encode empty object" {
@@ -170,10 +160,9 @@ test "encode empty object" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // Empty object = FS RS = "{,"
+    // Empty object = "{}"
     try std.testing.expectEqual(@as(usize, 2), result.len);
-    try std.testing.expectEqual(enc.FS, result[0]);
-    try std.testing.expectEqual(enc.RS, result[1]);
+    try std.testing.expectEqualStrings("{}", result);
 }
 
 test "encode object with entry" {
@@ -186,13 +175,9 @@ test "encode object with entry" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // FS "k" US "v" RS = "{k:v," = 5 bytes
+    // "{k:v}" = 5 bytes
     try std.testing.expectEqual(@as(usize, 5), result.len);
-    try std.testing.expectEqual(enc.FS, result[0]);
-    try std.testing.expectEqual(@as(u8, 'k'), result[1]);
-    try std.testing.expectEqual(enc.US, result[2]);
-    try std.testing.expectEqual(@as(u8, 'v'), result[3]);
-    try std.testing.expectEqual(enc.RS, result[4]);
+    try std.testing.expectEqualStrings("{k:v}", result);
 }
 
 test "encode nested structure" {
@@ -208,13 +193,7 @@ test "encode nested structure" {
     const result = try encode(allocator, val);
     defer allocator.free(result);
 
-    // FS "arr" US GS "x" US RS = "{arr:[x:," = 9 bytes
+    // "{arr:[x]}" = 9 bytes
     try std.testing.expectEqual(@as(usize, 9), result.len);
-    try std.testing.expectEqual(enc.FS, result[0]);
-    try std.testing.expectEqualStrings("arr", result[1..4]);
-    try std.testing.expectEqual(enc.US, result[4]);
-    try std.testing.expectEqual(enc.GS, result[5]);
-    try std.testing.expectEqual(@as(u8, 'x'), result[6]);
-    try std.testing.expectEqual(enc.US, result[7]);
-    try std.testing.expectEqual(enc.RS, result[8]);
+    try std.testing.expectEqualStrings("{arr:[x]}", result);
 }
