@@ -1,258 +1,267 @@
-# C0
-## A Hierarchical Binary Data Stream Designed for Human-Readable UTF-8 Environments
-## Canonical Specification (v1)
+# C0 (JSON-PB)
+## A Hierarchical Data Format: JSON Without Quotes, With Printable-Binary Encoding
+## Canonical Specification (v2)
 
-⸻
+---
 
 ## 1. Overview
 
-This specification defines a byte-oriented, streaming-friendly serialization format for structured data equivalent to a strict subset of JSON.
+C0 is a byte-oriented serialization format for structured data equivalent to a strict subset of JSON. It looks like JSON with the quotes removed and printable-binary encoding replacing escape sequences.
 
 Supported value types:
 
-- String
-- Array (ordered list of values)
-- Object (mapping from string keys to values)
+- **String** (arbitrary bytes, including binary)
+- **Array** (ordered list of values)
+- **Object** (ordered mapping from string keys to values)
 
 All values may be nested arbitrarily.
 
-The format uses four ASCII C0 control characters as structural tokens and a disjoint printable-binary encoding (see sibling project ../printable-binary for details) for all payload data. Payload bytes are guaranteed never to conflict with structural bytes.
+The format uses six printable ASCII characters as structural delimiters. All payload data is encoded using printable-binary (see sibling project `../printable-binary`), which escapes exactly these six characters. This guarantees zero ambiguity between structure and content.
 
-⸻
+### Example
+
+JSON:
+```json
+{"name":"Tav","level":5,"items":["sword","shield"]}
+```
+
+C0:
+```
+{name:Tav,level:5,items:[sword,shield]}
+```
+
+With binary or special data, printable-binary encoding kicks in:
+```json
+{"key:with:colons":"value{with}braces"}
+```
+
+C0:
+```
+{key꞉with꞉colons:value❴with❵braces}
+```
+
+The visually similar Unicode replacements (`꞉` for `:`, `❴❵` for `{}`, etc.) are produced by printable-binary encoding and are unambiguously not structural.
+
+---
 
 ## 2. Structural Bytes
 
-The following ASCII control bytes are reserved and have structural meaning:
+Six printable ASCII characters are reserved as structural delimiters:
 
-- FS (File Separator): 0x1C — begins an object
-- GS (Group Separator): 0x1D — begins an array
-- RS (Record Separator): 0x1E — terminates an object entry
-- US (Unit Separator): 0x1F — terminates an array element and separates object key/value
+| Byte | Character | Name | Purpose |
+|------|-----------|------|---------|
+| 0x7B | `{` | OBJECT_OPEN | Begins an object |
+| 0x7D | `}` | OBJECT_CLOSE | Ends an object |
+| 0x5B | `[` | ARRAY_OPEN | Begins an array |
+| 0x5D | `]` | ARRAY_CLOSE | Ends an array |
+| 0x2C | `,` | COMMA | Separates entries/elements |
+| 0x3A | `:` | COLON | Separates key from value |
 
-These four bytes are referred to collectively as structural bytes.
+These six bytes are referred to collectively as **structural bytes**.
+
+---
 
 ## 3. Payload Encoding Invariant
 
 **Invariant (Critical):**
 
-The payload encoding MUST NOT emit bytes 0x1C, 0x1D, 0x1E, or 0x1F under any circumstances.
+The payload encoding MUST NOT emit any of the six structural bytes (`{`, `}`, `[`, `]`, `,`, `:`) under any circumstances.
 
-All string data (including object keys and string values) MUST be encoded using a reversible printable-binary encoding whose output alphabet excludes these bytes.
+All string data (including object keys and string values) MUST be encoded using printable-binary encoding, whose output alphabet excludes these bytes via the following substitutions:
 
-Because UTF-8 is byte-oriented, structural bytes can never appear implicitly inside multibyte sequences. If a structural byte appears in the input stream, it is unambiguously structural.
+| Structural | Replacement | Unicode Name |
+|------------|-------------|--------------|
+| `{` | `❴` (U+2774) | MEDIUM LEFT CURLY BRACKET ORNAMENT |
+| `}` | `❵` (U+2775) | MEDIUM RIGHT CURLY BRACKET ORNAMENT |
+| `[` | `⟦` (U+27E6) | MATHEMATICAL LEFT WHITE SQUARE BRACKET |
+| `]` | `⟧` (U+27E7) | MATHEMATICAL RIGHT WHITE SQUARE BRACKET |
+| `,` | `٫` (U+066B) | ARABIC DECIMAL SEPARATOR |
+| `:` | `꞉` (U+A789) | MODIFIER LETTER COLON |
 
-⸻
+Because these replacements are multi-byte UTF-8 sequences and structural bytes are single ASCII bytes, a structural byte in the stream is always unambiguously structural.
 
-## 4. Data Model
+---
 
-A Value is one of:
+## 4. Whitespace
 
-- String
-- Array of Values
-- Object mapping Strings to Values
+**Spaces** (0x20) are significant content and are never stripped.
+
+**Tabs** (0x09), **newlines** (0x0A), and **carriage returns** (0x0D) are **insignificant whitespace** — they are stripped during parsing and carry no semantic meaning.
+
+This enables pretty-printed output that round-trips identically to compact output:
+
+Compact:
+```
+{name:Tav,items:[sword,shield]}
+```
+
+Pretty-printed (round-trips to the same Value):
+```
+{
+	name:Tav,
+	items:[
+		sword,
+		shield
+	]
+}
+```
+
+---
+
+## 5. Data Model
+
+A **Value** is one of:
+
+- **String** — arbitrary byte sequence (encoded via printable-binary)
+- **Array** — ordered sequence of Values
+- **Object** — ordered sequence of (key, value) entries where keys are Strings
 
 The top-level document is exactly one Value.
 
-⸻
+---
 
-## 5. Grammar (Informal but Complete)
+## 6. Grammar
 
-This grammar is defined operationally, not via regex or ABNF, to avoid ambiguity.
+### 6.1 Strings
 
-5.1 Strings
+A String is a (possibly empty) run of bytes that are neither structural bytes nor insignificant whitespace. The bytes are decoded from printable-binary encoding to recover the original data.
 
-A String is a sequence of payload bytes decoded from printable-binary encoding.
+String boundaries are determined by surrounding structural context — strings end when a structural byte or end-of-input is reached.
 
-String boundaries are determined entirely by surrounding structural context.
+### 6.2 Arrays
 
-Empty strings are allowed.
+```
+Array = '[' ']'                          (empty)
+      | '[' Value (',' Value)* ']'       (non-empty)
+```
 
-⸻
+- `[` opens the array.
+- `]` closes the array.
+- Elements are separated by `,`.
+- Insignificant whitespace may appear between any tokens.
 
-5.2 Objects
+### 6.3 Objects
 
-An Object begins with FS (0x1C) and ends implicitly after its final RS.
+```
+Object = '{' '}'                                      (empty)
+       | '{' Key ':' Value (',' Key ':' Value)* '}'   (non-empty)
+```
 
-Object rules:
+- `{` opens the object.
+- `}` closes the object.
+- Each entry is `Key : Value`.
+- Entries are separated by `,`.
+- Key is a String (parsed until `:` is reached).
+- Insignificant whitespace may appear between any tokens.
 
-- Each object entry consists of:
-Key US Value RS
+### 6.4 Value
 
-- US separates the key from the value.
-- RS terminates the entry.
+```
+Value = Object | Array | String
+```
 
-**Mandatory trailing rule:**
+Dispatch: if the next non-whitespace byte is `{`, parse Object. If `[`, parse Array. Otherwise, parse String.
 
-Every object MUST end with an RS, including the final entry.
+---
 
-**Empty object encoding:**
+## 7. Parsing Algorithm
 
-FS RS
+Parsing is performed in a single left-to-right pass. At each step, insignificant whitespace is skipped, then:
 
-5.3 Arrays
+1. **At top level**: Parse one Value. Skip trailing whitespace. Reject if input remains.
 
-An Array begins with GS (0x1D) and ends implicitly after its final US.
+2. **Value dispatch**: Peek at next byte.
+   - `{` → parse Object
+   - `[` → parse Array
+   - Otherwise → parse String (until structural byte or end)
 
-Array rules:
+3. **Array parsing**: Consume `[`. Skip ws. If `]`, done. Else loop: parse Value, skip ws, expect `]` (done) or `,` (continue). Any other byte is an error.
 
-- Each array element consists of:
-Value US
+4. **Object parsing**: Consume `{`. Skip ws. If `}`, done. Else loop: parse String (key), skip ws, expect `:`, parse Value, skip ws, expect `}` (done) or `,` (continue). Any other byte is an error.
 
-- US terminates the element.
+---
 
-**Mandatory trailing rule:**
+## 8. Empty String Ambiguity
 
-Every array MUST end with a US, including the final element.
+An empty string between two structural delimiters is indistinguishable from "no value." This creates exactly one known ambiguity:
 
-**Empty array encoding:**
+- `[""]` (array containing one empty string) encodes as `[]` — identical to an empty array.
 
-GS US
+Arrays with **two or more** empty strings round-trip correctly:
+- `["",""]` → `[,]` (the comma proves two elements exist)
+- `["","",""]` → `[,,]`
 
-## 6. Parsing Algorithm (Normative)
+Object entries with empty keys or values also work:
+- `{"":""}` → `{:}` (one entry: empty key, empty value)
 
-Parsing is performed in a single left-to-right pass using a stack.
+This single-empty-string ambiguity is a known, accepted limitation.
 
-Each stack frame is either:
+---
 
-- Object context
-- Array context
+## 9. JSON Mapping
 
-6.1 General Rules
+### 9.1 JSON to C0
 
-- Structural bytes are never payload.
-- Payload bytes are never structural.
-- Parsing decisions are made solely from the current context and the next structural byte.
+- JSON string → printable-binary encoded string (quotes removed)
+- JSON array → `[` + values separated by `,` + `]`
+- JSON object → `{` + key `:` value entries separated by `,` + `}`
 
-⸻
+JSON numbers, booleans, and null are encoded as their string representations. C0 does not distinguish types at the format level — type information is the concern of higher-level schemas.
 
-6.2 Parsing Objects
+### 9.2 C0 to JSON
 
-When FS is encountered:
-	1.	Push an Object context.
-	2.	Expect either:
-- a key (payload string), or
-- RS (empty object).
-
-While in Object context:
-
-- Read key (payload string).
-- Expect US.
-- Parse Value.
-- Expect RS.
-
-After consuming an RS:
-
-- If the next byte can begin a key (payload byte), continue object.
-- Otherwise, the object has ended; pop the Object context.
-
-⸻
-
-6.3 Parsing Arrays
-
-When GS is encountered:
-	1.	Push an Array context.
-	2.	Expect either:
-- a Value, or
-- US (empty array).
-
-While in Array context:
-
-- Parse Value.
-- Expect US.
-
-After consuming a US:
-
-- If the next byte can begin a Value, continue array.
-- Otherwise, the array has ended; pop the Array context.
-
-⸻
-
-6.4 Value Parsing
-
-A Value is parsed as follows:
-
-- If the next byte is FS, parse Object.
-- Else if the next byte is GS, parse Array.
-- Else parse String until a structural byte valid in the current context is encountered.
-
-## 7. Termination and Disambiguation
-
-Because:
-
-- Objects MUST end with RS, and
-- Arrays MUST end with US, and
-- Payload bytes can never equal structural bytes,
-
-container termination is unambiguous.
-
-Consecutive structural bytes indicate successive container closures. Each structural byte is consumed by the innermost compatible context; otherwise, it signals that context has ended.
-
-⸻
-
-## 8. JSON Mapping
-
-8.1 JSON → This Format
-
-- JSON string → printable-binary encoded string
-- JSON array → GS + (value US)* + US
-- JSON object → FS + (key US value RS)* + RS
-
-JSON numbers, booleans, and null are out of scope for this version.
-
-⸻
-
-8.2 This Format → JSON
-
-- String → JSON string
+- String → JSON string (with standard JSON escaping)
 - Array → JSON array
 - Object → JSON object
 
-Key order MAY be preserved but MUST NOT be relied upon.
+Key order is preserved.
 
-⸻
+---
 
-## 9. Error Conditions (MUST Reject)
+## 10. Error Conditions
 
 An implementation MUST reject:
 
-- Structural bytes appearing in payload decoding
-- Object entry missing US or RS
-- Array element missing US
-- Unterminated object or array
-- Structural byte illegal in current context
-- Trailing payload after full document parse
+- Unexpected end of input inside an array or object
+- Missing closing delimiter (`]` or `}`)
+- Unexpected byte where `,`, `]`, or `}` was expected
+- Trailing non-whitespace data after the top-level value
 
-⸻
+---
 
-## 10. Reserved Bytes
+## 11. Comparison with JSON
 
-The following bytes are reserved and MUST NOT appear in payload:
+| Property | JSON | C0 |
+|----------|------|----|
+| String delimiters | `"..."` with `\` escapes | None — printable-binary encoding |
+| Binary data | Requires base64 | Native (printable-binary) |
+| Structural chars | `{ } [ ] , :` | Same six characters |
+| Whitespace | Insignificant | Spaces significant; tabs/newlines insignificant |
+| Human-readable | Yes | Yes (more compact) |
+| Streaming | Needs lookahead | Single-pass, left-to-right |
 
-- 0x1C FS
-- 0x1D GS
-- 0x1E RS
-- 0x1F US
+---
 
-Optional future reservation:
-
-- 0x1B ESC (currently unused)
-
-⸻
-
-## 11. Design Guarantees
+## 12. Design Guarantees
 
 This format guarantees:
 
-- No escaping logic
-- No length prefixes
-- No explicit closing tags
-- Unambiguous nesting
-- Streaming-safe parsing
-- UTF-8 compatibility
-- Deterministic round-tripping with JSON subset
+- **No escaping logic** — printable-binary handles all encoding
+- **No length prefixes** — boundaries are delimiter-based
+- **Explicit closing delimiters** — `]` and `}` close containers
+- **Unambiguous nesting** — structural bytes cannot appear in payloads
+- **Insignificant whitespace** — tabs/newlines enable pretty-printing without affecting data
+- **Streaming-safe parsing** — single left-to-right pass
+- **UTF-8 compatible** — all output is valid UTF-8
+- **Deterministic round-tripping** — with JSON subset (modulo the single-empty-string ambiguity)
+- **Binary-native** — arbitrary byte payloads without base64
 
-⸻
+---
 
-## 12. End of Specification
+## 13. Smart Encoding
 
-We will build this in Zig and control dependencies with a combination of Zig packages and Nix. We will use TDD for all new features, and build things step by step.
+Implementations SHOULD use smart encoding: only apply printable-binary encoding to payloads that actually need it (contain structural bytes, control characters, or invalid UTF-8). Data that is already safe passes through unchanged. Data that is already printable-binary encoded is not double-encoded.
+
+---
+
+## 14. End of Specification
