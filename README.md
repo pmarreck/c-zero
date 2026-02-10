@@ -31,7 +31,7 @@ JSON:     {"data": "SGVsbG8sIFdvcmxkIQABAg=="}  (base64 - unreadable)
 C0:       {data:Hello٫ Worldǃ·¯«}              (readable!)
 ```
 
-The ASCII text "Hello, World!" remains visible in C0 output, while special bytes become recognizable Unicode glyphs. The comma becomes `٫` and the exclamation mark becomes `ǃ` because they're structural characters that printable-binary escapes.
+The ASCII text "Hello, World!" remains visible in C0 output, while special bytes become recognizable Unicode glyphs. The comma becomes `٫` because it's a structural delimiter, and the exclamation mark becomes `ǃ` because printable-binary escapes symbols that are commonly overloaded in programming contexts.
 
 ## Features
 
