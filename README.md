@@ -10,7 +10,7 @@ C0 builds on [**printable-binary**](https://github.com/pmarreck/printable-binary
 
 The name "C0" is a historical nod to the [C0 control codes](https://en.wikipedia.org/wiki/C0_and_C1_control_codes) (bytes 0x00-0x1F in ASCII), which include characters like File Separator (FS), Group Separator (GS), Record Separator (RS), and Unit Separator (US). Early versions of this format actually used these control codes as structural delimiters.
 
-However, raw control codes cause problems: they're invisible in editors, break terminal output, and can't be safely copy-pasted. So we switched to printable ASCII delimiters (`{`, `[`, `,`, `:`) that printable-binary escapes when they appear in data. The name stuck as a reminder of the format's origins and its purpose: structured data with clear separation.
+However, raw control codes cause problems: they're invisible in editors, break terminal output, and can't be safely copy-pasted. So we switched to printable ASCII delimiters (`{`, `}`, `[`, `]`, `,`, `:`) — the same six characters JSON uses — that printable-binary escapes when they appear in data. The result is essentially **JSON without quotes, with printable-binary encoding instead of escape sequences**. The name stuck as a reminder of the format's origins and its purpose: structured data with clear separation.
 
 ## Why C0?
 
@@ -28,10 +28,10 @@ However, raw control codes cause problems: they're invisible in editors, break t
 
 ```
 JSON:     {"data": "SGVsbG8sIFdvcmxkIQABAg=="}  (base64 - unreadable)
-C0:       {data:Hello٫ Worldǃ·¯«,              (readable!)
+C0:       {data:Hello٫ Worldǃ·¯«}              (readable!)
 ```
 
-The ASCII text "Hello, World!" remains visible in C0 output, while special bytes become recognizable Unicode glyphs. Only the comma and exclamation mark are encoded (`٫` and `ǃ`) because they're structural delimiters.
+The ASCII text "Hello, World!" remains visible in C0 output, while special bytes become recognizable Unicode glyphs. The comma becomes `٫` and the exclamation mark becomes `ǃ` because they're structural characters that printable-binary escapes.
 
 ## Features
 
@@ -112,22 +112,28 @@ C0 supports three value types:
 
 ### Structural Delimiters
 
-C0 uses printable ASCII characters as structural delimiters:
+C0 uses the same six printable ASCII characters as JSON for structure:
 
 | Delimiter | Character | Purpose |
 |-----------|-----------|---------|
 | `{` | Open brace | Begins object |
+| `}` | Close brace | Ends object |
 | `[` | Open bracket | Begins array |
-| `,` | Comma | Terminates object entry |
-| `:` | Colon | Terminates array element / separates key from value |
+| `]` | Close bracket | Ends array |
+| `,` | Comma | Separates entries/elements |
+| `:` | Colon | Separates key from value |
 
 These characters are **escaped by printable_binary** when they appear in payload data:
-- `{` → `❴` (U+2774)
-- `[` → `⟦` (U+27E6)
+- `{` → `❴` (U+2774), `}` → `❵` (U+2775)
+- `[` → `⟦` (U+27E6), `]` → `⟧` (U+27E7)
 - `,` → `٫` (U+066B)
 - `:` → `꞉` (U+A789)
 
 This ensures no ambiguity: delimiters in data get escaped, structural delimiters don't.
+
+### Whitespace
+
+**Spaces** are significant content. **Tabs and newlines** are insignificant — stripped during parsing. This enables pretty-printed output that round-trips identically to compact output.
 
 ### Smart Encoding
 
@@ -141,17 +147,27 @@ C0 uses intelligent encoding to avoid double-encoding:
 
 **Simple array:**
 ```
-["hello", "world"]  →  [hello:world:
+["hello", "world"]  →  [hello,world]
 ```
 
 **Object:**
 ```
-{"key": "value"}  →  {key:value,
+{"key": "value"}  →  {key:value}
 ```
 
 **Nested structure:**
 ```
-{"arr": ["x", "y"]}  →  {arr:[x:y:,
+{"arr": ["x", "y"]}  →  {arr:[x,y]}
+```
+
+**Pretty-printed** (same data, with insignificant whitespace):
+```
+{
+	arr:[
+		x,
+		y
+	]
+}
 ```
 
 **Binary data with visible ASCII:**
@@ -183,16 +199,29 @@ C0 includes a codec plugin architecture that transforms binary file formats into
 
 ### Expand / Collapse
 
-**Expand** converts a binary file into C0 text:
+**Expand** converts a binary file into pretty-printed C0 text:
 ```bash
 c0 expand image.png
-# Output: {format:png,signature:ɃPNG⏎¶Ƶ¶,chunks:[{type:IHDR,data:...
+# Output:
+# {
+# 	format:png,
+# 	signature:ɃPNG⏎¶Ƶ¶,
+# 	chunks:[
+# 		{type:IHDR,data:...},
+# 		...
+# 	]
+# }
 ```
 
 **Collapse** converts C0 text back to the native format:
 ```bash
 c0 expand image.png | c0 collapse > roundtrip.png
 # roundtrip.png is byte-identical to image.png
+```
+
+Use `--compact` for single-line output (e.g., for piping or storage):
+```bash
+c0 expand --compact image.png
 ```
 
 Every codec embeds a `format` key in its C0 output, making the data self-describing. On collapse, the codec is inferred from this field automatically.
@@ -229,7 +258,7 @@ c0-codec-myformat collapse [--editable] # stdin: C0 text -> stdout: raw bytes
 
 The `info` subcommand outputs C0-formatted metadata:
 ```
-{name:myformat,description:My custom format,extensions:[.myf:,supports_faithful:true,supports_editable:true,
+{name:myformat,description:My custom format,extensions:[.myf],supports_faithful:true,supports_editable:true}
 ```
 
 Built-in codecs always take priority over subprocess codecs with the same name. Subprocess codecs are discovered automatically and listed by `c0 codecs`.
@@ -254,8 +283,8 @@ an application-specific encoder might look like.
 1. Input JSON - C2PA manifest (629 bytes):
 {"jumbf": {"c2pa.manifest.nikon": {"status": "preserved-from-camera"}, "c2pa.manifest.cloudflare": {"claim_generator": "Cloudflare Images", "assertions": [{"label": "c2pa.actions", "data": {"actions": [{"action": "c2pa.resized", "when": "2025-01-10T12:05:00Z", "softwareAgent": "Cloudflare Images", "parameters": {"originalDimensions": {"width": 8256, "height": 5504}, "newDimensions": {"width": 800, "height": 533}}}]}}], "signature_info": {"issuer": "Cloudflare, Inc", "time": "2025-01-10T12:05:00Z", "cert_fingerprint": "fedcba9876543210"}, "claim_metadata": {"claim_id": "cf_resize_123", "parent_claim_id": "nikon_z9_123"}}}}
 
-2. Content-aware C0 encoded (503 bytes):
-{jumbf:{c2pa.manifest.nikon:{status:preserved˗from˗camera,,c2pa.manifest.cloudflare:{claim_generator:Cloudflare Images,assertions:[{label:c2pa.actions,data:{actions:[{action:c2pa.resized,when:©¦SGż⁎8·,softwareAgent:Cloudflare Images,parameters:{originalDimensions:{width:8256,height:5504,,newDimensions:{width:800,height:533,,,:,,:,signature_info:{issuer:Cloudflare٫ Inc,time:©¦SGż⁎8·,cert_fingerprint:żŗĴȸvT2Ɣ,,claim_metadata:{claim_id:cf_resize_123,parent_claim_id:nikon_z9_123,,,,
+2. Content-aware C0 encoded:
+{jumbf:{c2pa.manifest.nikon:{status:preserved˗from˗camera},c2pa.manifest.cloudflare:{claim_generator:Cloudflare Images,assertions:[{label:c2pa.actions,data:{actions:[{action:c2pa.resized,when:©¦SGż⁎8·,softwareAgent:Cloudflare Images,parameters:{originalDimensions:{width:8256,height:5504},newDimensions:{width:800,height:533}}}]}}],signature_info:{issuer:Cloudflare٫ Inc,time:©¦SGż⁎8·,cert_fingerprint:żŗĴȸvT2Ɣ},claim_metadata:{claim_id:cf_resize_123,parent_claim_id:nikon_z9_123}}}}
 
    Transformations applied:
    - Timestamps -> 8-byte nanosecond-epoch binary (pb-encoded)
@@ -278,8 +307,8 @@ an application-specific encoder might look like.
    ɃPNG⏎¶Ƶ¶·¯«»Hello·World
 
 7. Embedding binary in JSON via C0:
-   C0 output (95 bytes):
-   {png_header:ɃPNG⏎¶Ƶ¶·¯«»Hello·World,description:PNG file with null bytes embeddedǃ,
+   C0 output:
+   {png_header:ɃPNG⏎¶Ƶ¶·¯«»Hello·World,description:PNG file with null bytes embeddedǃ}
 
    Note: The binary data remains readable as printable-binary glyphs!
    'PNG' is visible, control bytes become distinct Unicode characters.
@@ -314,8 +343,8 @@ zig build run-binary-demo
 Sample output:
 ```
 --- Demo 2: Structured Binary Message ---
-C0 encoded (113 bytes):
-{header:[⌦ELF:«:¯···:,payload:This is the payload data...
+C0 encoded:
+{header:[⌦ELF,«,¯···],payload:This is the payload data...}
 
 --- Demo 4: Size Comparison with Base64 ---
 Data Type              Original         C0    Base64*
@@ -349,7 +378,7 @@ Chunk layout:
 IHDR: 354x87, 8-bit RGBA
 
 C0 snippet (first 200 bytes):
-{signature:ɃPNG⏎¶Ƶ¶,chunks:[{type:IHDR,data:··¯b···W⌫¡···,crc:˃ȡOǑ,:{type:iCCP,data:ICC Profile··...
+{signature:ɃPNG⏎¶Ƶ¶,chunks:[{type:IHDR,data:··¯b···W⌫¡···,crc:˃ȡOǑ},{type:iCCP,data:ICC Profile··...
 
 === Round-Trip Verification ===
 Original:    13838 bytes
@@ -368,7 +397,7 @@ C0 uses [printable-binary](https://github.com/pmarreck/printable-binary) for enc
 Key features of printable-binary:
 - Every byte (0x00-0xFF) maps to a distinct, visually recognizable UTF-8 glyph
 - ASCII text passes through unchanged (including spaces by default)
-- Structural delimiters used by C0 are escaped: `{→❴`, `[→⟦`, `,→٫`, `:→꞉`
+- All six C0 structural characters are escaped: `{→❴`, `}→❵`, `[→⟦`, `]→⟧`, `,→٫`, `:→꞉`
 - Fully reversible - decode always recovers the original bytes
 
 ## Documentation
