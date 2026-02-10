@@ -185,6 +185,7 @@ The "PNG" and "Hello from binary!" parts remain readable, while control bytes be
 3. **Network debugging** - Capture packets in human-readable format
 4. **Data archives** - Bundle files with readable metadata
 5. **JSON alternative** - When you need binary support without base64
+6. **Test suites** - Include binary snippets directly in test fixtures as readable text, assert on binary outputs, or provide binary inputs to processes — no more hex dumps or base64 blobs in your test data
 
 ## Codec System
 
