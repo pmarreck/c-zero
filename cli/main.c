@@ -313,14 +313,19 @@ static void print_usage(const char* program_name) {
     fprintf(stderr, "  expand [opts] <file>  Expand binary file to C0 text on stdout\n");
     fprintf(stderr, "  collapse [opts] [file] Collapse C0 text back to native format on stdout\n");
     fprintf(stderr, "  to-json [file]      Convert C0 text to JSON (naive, all strings as JSON strings)\n");
-    fprintf(stderr, "  get <path> [file]   Query a value by jq-style path (e.g., .key[0].name)\n");
-    fprintf(stderr, "  set <path> <value> [file]  Set a value at path, emit updated C0\n");
+    fprintf(stderr, "  get <path> [opts] [file]  Query a value by jq-style path (e.g., .key[0].name)\n");
+    fprintf(stderr, "  set <path> <val> [opts] [file]  Set a value at path, emit updated C0\n");
     fprintf(stderr, "  codecs              List available codecs\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Expand/Collapse options:\n");
     fprintf(stderr, "  --codec <name>      Use specific codec (default: auto-detect)\n");
     fprintf(stderr, "  --editable          Editable mode (omit/recalculate derived fields)\n");
-    fprintf(stderr, "  --compact           Compact output (no pretty-printing, expand only)\n");
+    fprintf(stderr, "  --compact           Compact output (no pretty-printing)\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Get/Set options:\n");
+    fprintf(stderr, "  --as <type>         Interpret binary as type (u8..u64, i8..i64, f32, f64,\n");
+    fprintf(stderr, "                      uuid, datetime-s/ms/ns, utf16le/be, hex, base64, bigint)\n");
+    fprintf(stderr, "                      Append 'be' for big-endian (e.g., u32be, f64be)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -h, --help          Show this help message\n");
@@ -334,7 +339,9 @@ static void print_usage(const char* program_name) {
             program_name, program_name);
     fprintf(stderr, "  %s to-json image.c0\n", program_name);
     fprintf(stderr, "  %s get .format image.c0\n", program_name);
+    fprintf(stderr, "  %s get .width --as u32 image.c0\n", program_name);
     fprintf(stderr, "  %s set .name Alice image.c0 > updated.c0\n", program_name);
+    fprintf(stderr, "  %s set .width 1920 --as u32 image.c0 > updated.c0\n", program_name);
     fprintf(stderr, "  %s codecs\n", program_name);
 }
 
@@ -872,22 +879,39 @@ static int cmd_to_json(int argc, char* argv[]) {
 
 /**
  * get command: query a value by jq-style path
- * Usage: c0 get <path> [file]
+ * Usage: c0 get <path> [--as <type>] [file]
  * If no file given, reads from stdin.
  */
 static int cmd_get(int argc, char* argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Error: get requires a path argument\n");
-        fprintf(stderr, "Usage: c0 get <path> [file]\n");
+        fprintf(stderr, "Usage: c0 get <path> [--as <type>] [file]\n");
         return 1;
     }
 
     const char* path = argv[2];
+    const char* as_type = NULL;
+    const char* filepath = NULL;
+
+    /* Parse remaining arguments */
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--as") == 0) {
+            if (i + 1 < argc) {
+                as_type = argv[++i];
+            } else {
+                fprintf(stderr, "Error: --as requires a type argument\n");
+                return 1;
+            }
+        } else {
+            filepath = argv[i];
+        }
+    }
+
     char* data;
     size_t data_len;
 
-    if (argc > 3) {
-        data = read_file(argv[3], &data_len);
+    if (filepath) {
+        data = read_file(filepath, &data_len);
     } else {
         data = read_stdin(&data_len);
     }
@@ -904,6 +928,7 @@ static int cmd_get(int argc, char* argv[]) {
     uint8_t* result = c0_get(arena,
         (const uint8_t*)data, data_len,
         path, strlen(path),
+        as_type, as_type ? strlen(as_type) : 0,
         &result_len);
 
     if (!result) {
@@ -914,6 +939,10 @@ static int cmd_get(int argc, char* argv[]) {
     }
 
     fwrite(result, 1, result_len, stdout);
+    /* Add newline if result doesn't end with one */
+    if (result_len > 0 && result[result_len - 1] != '\n') {
+        putchar('\n');
+    }
 
     c0_arena_free(arena);
     free(data);
@@ -922,19 +951,21 @@ static int cmd_get(int argc, char* argv[]) {
 
 /**
  * set command: set a value at a path, emit updated C0
- * Usage: c0 set <path> <value> [--compact] [file]
+ * Usage: c0 set <path> <value> [--as <type>] [--compact] [file]
  * If no file given, reads from stdin.
  * The value is raw C0 text (e.g., "hello" for a string, "[a,b]" for an array).
+ * With --as, the value is human-readable text that gets encoded to binary bytes.
  */
 static int cmd_set(int argc, char* argv[]) {
     if (argc < 4) {
         fprintf(stderr, "Error: set requires a path and value\n");
-        fprintf(stderr, "Usage: c0 set <path> <value> [--compact] [file]\n");
+        fprintf(stderr, "Usage: c0 set <path> <value> [--as <type>] [--compact] [file]\n");
         return 1;
     }
 
     const char* path = argv[2];
     const char* new_value = argv[3];
+    const char* as_type = NULL;
     int pretty = 1;
     const char* filepath = NULL;
 
@@ -942,6 +973,13 @@ static int cmd_set(int argc, char* argv[]) {
     for (int i = 4; i < argc; i++) {
         if (strcmp(argv[i], "--compact") == 0) {
             pretty = 0;
+        } else if (strcmp(argv[i], "--as") == 0) {
+            if (i + 1 < argc) {
+                as_type = argv[++i];
+            } else {
+                fprintf(stderr, "Error: --as requires a type argument\n");
+                return 1;
+            }
         } else {
             filepath = argv[i];
         }
@@ -969,6 +1007,7 @@ static int cmd_set(int argc, char* argv[]) {
         (const uint8_t*)data, data_len,
         path, strlen(path),
         (const uint8_t*)new_value, strlen(new_value),
+        as_type, as_type ? strlen(as_type) : 0,
         pretty,
         &result_len);
 

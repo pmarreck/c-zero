@@ -506,6 +506,8 @@ export fn c0_get(
     c0_len: usize,
     path: ?[*]const u8,
     path_len: usize,
+    as_type: ?[*]const u8,
+    as_type_len: usize,
     out_len: ?*usize,
 ) ?[*]u8 {
     const a = arena orelse return null;
@@ -523,7 +525,32 @@ export fn c0_get(
     // Traverse
     const result = core.queryValue(value, segments) orelse return null;
 
-    // Format result
+    // If --as type is specified, interpret the string bytes
+    if (as_type) |at| {
+        if (as_type_len > 0) {
+            const type_name = at[0..as_type_len];
+            const spec = core.parseTypeName(type_name) catch return null;
+
+            // Result must be a string value
+            const str_data = switch (result) {
+                .string => |s| s,
+                else => return null,
+            };
+
+            // Decode the pb-encoded string back to raw bytes
+            const raw_bytes = core.decodePayload(allocator, str_data) catch return null;
+
+            // Interpret the raw bytes as the specified type
+            const interpreted = core.interpret.interpret(allocator, raw_bytes, spec) catch return null;
+
+            if (out_len) |lp| {
+                lp.* = interpreted.len;
+            }
+            return interpreted.ptr;
+        }
+    }
+
+    // Format result (default behavior)
     const output = core.query.formatResult(allocator, result) catch return null;
 
     if (out_len) |lp| {
@@ -544,6 +571,8 @@ export fn c0_set(
     path_len: usize,
     new_value_c0: ?[*]const u8,
     new_value_len: usize,
+    as_type: ?[*]const u8,
+    as_type_len: usize,
     pretty: c_int,
     out_len: ?*usize,
 ) ?[*]u8 {
@@ -557,11 +586,32 @@ export fn c0_set(
     // Decode the root C0 data
     const root = core.decode(allocator, d[0..c0_len]) catch return null;
 
-    // Decode the new value
-    const new_val = core.decode(allocator, nv[0..new_value_len]) catch return null;
-
     // Parse path
     const segments = core.parsePath(allocator, p[0..path_len]) catch return null;
+
+    // Determine the new value
+    var new_val: core.Value = undefined;
+
+    if (as_type) |at| {
+        if (as_type_len > 0) {
+            const type_name = at[0..as_type_len];
+            const spec = core.parseTypeName(type_name) catch return null;
+
+            // Encode the human-readable text into raw bytes
+            const raw_bytes = core.interpret.encode(allocator, nv[0..new_value_len], spec) catch return null;
+
+            // Encode the raw bytes as a pb-encoded string value
+            const encoded = core.encodePayload(allocator, raw_bytes) catch return null;
+
+            new_val = .{ .string = encoded };
+        } else {
+            // No type specified, treat as C0 text
+            new_val = core.decode(allocator, nv[0..new_value_len]) catch return null;
+        }
+    } else {
+        // No type specified, treat as C0 text
+        new_val = core.decode(allocator, nv[0..new_value_len]) catch return null;
+    }
 
     // Set value
     const updated = core.query.setValue(allocator, root, segments, new_val) catch return null;

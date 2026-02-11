@@ -287,6 +287,26 @@ c0 expand data.json | c0 set .value.name Bob > updated.c0
 c0 expand data.json | c0 set .value.scores[0] i999 | c0 collapse > modified.json
 ```
 
+**`--as <type>`** interprets binary data as a specific type on `get`, or encodes human-readable values to binary on `set`:
+```bash
+# Read binary fields as human-readable types
+c0 get .width --as u32 image.c0           # 1920
+c0 get .timestamp --as datetime-s data.c0 # 2024-01-15T10:30:00Z
+c0 get .id --as uuid data.c0              # 550e8400-e29b-41d4-a716-446655440000
+c0 get .payload --as hex data.c0          # 48656c6c6f
+c0 get .payload --as base64 data.c0       # SGVsbG8=
+
+# Write human-readable values as binary
+c0 set .width 1920 --as u32 image.c0 > updated.c0
+c0 set .timestamp '2024-06-01T00:00:00Z' --as datetime-s data.c0 > updated.c0
+
+# Endianness: little-endian by default, append 'be' for big-endian
+c0 get .value --as u32 data.c0      # little-endian (default)
+c0 get .value --as u32be data.c0    # big-endian
+```
+
+Supported types: `u8` `u16` `u32` `u64` `i8` `i16` `i32` `i64` `f32` `f64` (+ `be` variants), `uuid`, `datetime-s` `datetime-ms` `datetime-ns`, `utf16` `utf16be`, `hex`, `base64`, `bigint` `bigint-be`.
+
 **`c0 to-json`** converts any C0 data to JSON for interop with tools like `jq`. This is a **naive one-way conversion** — all C0 strings become JSON strings with no type interpretation:
 ```bash
 c0 expand image.png | c0 to-json | jq '.chunks[0].type'

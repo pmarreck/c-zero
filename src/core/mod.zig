@@ -41,6 +41,10 @@ pub const query = @import("query.zig");
 pub const queryValue = query.queryValue;
 pub const parsePath = query.parsePath;
 
+pub const interpret = @import("interpret.zig");
+pub const TypeSpec = interpret.TypeSpec;
+pub const parseTypeName = interpret.parseTypeName;
+
 test {
     _ = value;
     _ = encoding;
@@ -48,5 +52,6 @@ test {
     _ = decoder;
     _ = json_content;
     _ = query;
+    _ = interpret;
     _ = @import("roundtrip_test.zig");
 }

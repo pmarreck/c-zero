@@ -128,21 +128,27 @@ uint8_t* c0_to_json(C0Arena* arena,
 /** Query a path in C0 data (jq-style: ".key[0].key2").
  *  For strings: returns raw string bytes + newline.
  *  For arrays/objects: returns compact C0 text + newline.
+ *  as_type: NULL for raw output, or type name (e.g. "u32", "f64", "uuid")
+ *           to interpret binary string bytes (pass as_type_len=0 for NULL)
  *  Returns NULL if path is invalid or doesn't match */
 uint8_t* c0_get(C0Arena* arena,
     const uint8_t* c0_data, size_t c0_len,
     const char* path, size_t path_len,
+    const char* as_type, size_t as_type_len,
     size_t* out_len);
 
 /** Set a value at a path in C0 data, returning new C0 text.
  *  path: jq-style path (e.g., ".name", ".users[0].age")
- *  new_value_c0: the new value as C0 text
+ *  new_value_c0: the new value as C0 text (or human-readable text if as_type set)
+ *  as_type: NULL to treat new_value_c0 as C0 text, or type name (e.g. "u32")
+ *           to encode human-readable text into binary (pass as_type_len=0 for NULL)
  *  pretty: 1=pretty-print, 0=compact
  *  Returns new C0 text with the value replaced, or NULL on failure */
 uint8_t* c0_set(C0Arena* arena,
     const uint8_t* c0_data, size_t c0_len,
     const char* path, size_t path_len,
     const uint8_t* new_value_c0, size_t new_value_len,
+    const char* as_type, size_t as_type_len,
     int pretty,
     size_t* out_len);
 
