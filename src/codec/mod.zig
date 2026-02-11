@@ -11,6 +11,7 @@ const Value = core.Value;
 pub const png = @import("png.zig");
 pub const bg3 = @import("bg3/mod.zig");
 pub const json = @import("json.zig");
+pub const exif = @import("exif/mod.zig");
 
 /// Error type for codec operations
 pub const CodecError = error{
@@ -193,11 +194,15 @@ pub const Registry = struct {
 var png_instance = png.PngCodec{};
 var bg3_instance = bg3.Bg3Codec{};
 var json_instance = json.JsonCodec{};
+var jpeg_instance = exif.JpegCodec{};
+var tiff_instance = exif.TiffCodec{};
 
 pub const builtin_codecs = [_]Codec{
     Codec.init(&png_instance),
     Codec.init(&bg3_instance),
     Codec.init(&json_instance),
+    Codec.init(&jpeg_instance),
+    Codec.init(&tiff_instance),
 };
 
 pub const builtin_registry = Registry{
@@ -243,8 +248,48 @@ test "registry returns null for unrecognized data" {
     try std.testing.expect(codec == null);
 }
 
+test "registry finds JPEG codec by name" {
+    const c = builtin_registry.findByName("jpeg");
+    try std.testing.expect(c != null);
+    try std.testing.expectEqualStrings("jpeg", c.?.info().name);
+}
+
+test "registry finds JPEG codec by extension" {
+    const c = builtin_registry.findByExtension(".jpg");
+    try std.testing.expect(c != null);
+    try std.testing.expectEqualStrings("jpeg", c.?.info().name);
+}
+
+test "registry detects JPEG from magic bytes" {
+    const jpeg_sig = "\xFF\xD8\xFF\xE0extra";
+    const c = builtin_registry.detect(null, jpeg_sig);
+    try std.testing.expect(c != null);
+    try std.testing.expectEqualStrings("jpeg", c.?.info().name);
+}
+
+test "registry finds TIFF codec by name" {
+    const c = builtin_registry.findByName("tiff");
+    try std.testing.expect(c != null);
+    try std.testing.expectEqualStrings("tiff", c.?.info().name);
+}
+
+test "registry detects TIFF LE from magic bytes" {
+    const tiff_sig = "II\x2a\x00extra";
+    const c = builtin_registry.detect(null, tiff_sig);
+    try std.testing.expect(c != null);
+    try std.testing.expectEqualStrings("tiff", c.?.info().name);
+}
+
+test "registry detects TIFF BE from magic bytes" {
+    const tiff_sig = "MM\x00\x2aextra";
+    const c = builtin_registry.detect(null, tiff_sig);
+    try std.testing.expect(c != null);
+    try std.testing.expectEqualStrings("tiff", c.?.info().name);
+}
+
 test {
     _ = png;
     _ = bg3;
     _ = json;
+    _ = exif;
 }

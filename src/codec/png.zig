@@ -9,6 +9,7 @@
 const std = @import("std");
 const core = @import("c0_core");
 const codec = @import("mod.zig");
+const exif_ifd = @import("exif/ifd.zig");
 
 const Value = core.Value;
 const Entry = core.Entry;
@@ -64,6 +65,32 @@ fn expandPng(allocator: std.mem.Allocator, data: []const u8, options: CodecOptio
 
         const chunk_data = data[data_start..data_end];
         const chunk_crc = data[data_end..crc_end];
+
+        // Check for eXIf chunk — parse EXIF data
+        const is_exif = std.mem.eql(u8, chunk_type, "eXIf");
+        if (is_exif and chunk_data.len >= 8) {
+            // Try to parse EXIF TIFF data
+            if (exif_ifd.expandTiffData(allocator, chunk_data)) |exif_value| {
+                if (options.faithful) {
+                    const entries = allocator.alloc(Entry, 4) catch return CodecError.OutOfMemory;
+                    entries[0] = .{ .key = "type", .value = .{ .string = chunk_type } };
+                    entries[1] = .{ .key = "exif", .value = exif_value };
+                    entries[2] = .{ .key = "crc", .value = .{ .string = chunk_crc } };
+                    entries[3] = .{ .key = "_raw", .value = .{ .string = chunk_data } };
+                    chunk_list.append(allocator, .{ .object = entries }) catch return CodecError.OutOfMemory;
+                } else {
+                    const entries = allocator.alloc(Entry, 2) catch return CodecError.OutOfMemory;
+                    entries[0] = .{ .key = "type", .value = .{ .string = chunk_type } };
+                    entries[1] = .{ .key = "exif", .value = exif_value };
+                    chunk_list.append(allocator, .{ .object = entries }) catch return CodecError.OutOfMemory;
+                }
+                pos = crc_end;
+                if (std.mem.eql(u8, chunk_type, "IEND")) break;
+                continue;
+            } else |_| {
+                // EXIF parse failed — fall through to raw data handling
+            }
+        }
 
         // Build chunk object entries
         if (options.faithful) {
@@ -140,6 +167,8 @@ fn collapsePng(allocator: std.mem.Allocator, value: Value, options: CodecOptions
         var chunk_type: ?[]const u8 = null;
         var chunk_data: ?[]const u8 = null;
         var chunk_crc: ?[]const u8 = null;
+        var exif_val: ?Value = null;
+        var raw_data: ?[]const u8 = null;
 
         for (chunk_entries) |entry| {
             if (std.mem.eql(u8, entry.key, "type")) {
@@ -157,11 +186,35 @@ fn collapsePng(allocator: std.mem.Allocator, value: Value, options: CodecOptions
                     .string => |s| s,
                     else => return CodecError.InvalidFormat,
                 };
+            } else if (std.mem.eql(u8, entry.key, "exif")) {
+                exif_val = entry.value;
+            } else if (std.mem.eql(u8, entry.key, "_raw")) {
+                raw_data = switch (entry.value) {
+                    .string => |s| s,
+                    else => return CodecError.InvalidFormat,
+                };
             }
         }
 
         const ct = chunk_type orelse return CodecError.InvalidFormat;
-        const cd = chunk_data orelse return CodecError.InvalidFormat;
+
+        // Handle eXIf chunks with parsed EXIF data
+        const cd = blk: {
+            if (exif_val != null and std.mem.eql(u8, ct, "eXIf")) {
+                // Rebuild chunk data from EXIF structure
+                if (options.faithful) {
+                    if (raw_data) |rd| {
+                        break :blk rd;
+                    }
+                }
+                // Editable mode: serialize from parsed EXIF
+                if (exif_val) |ev| {
+                    const tiff_bytes = exif_ifd.collapseTiffData(allocator, ev) catch return CodecError.InvalidFormat;
+                    break :blk @as([]const u8, tiff_bytes);
+                }
+            }
+            break :blk chunk_data orelse return CodecError.InvalidFormat;
+        };
 
         // Write length (4 bytes BE)
         var len_buf: [4]u8 = undefined;
