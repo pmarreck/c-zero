@@ -661,6 +661,92 @@ pub fn freeC0Value(allocator: std.mem.Allocator, val: Value) void {
 }
 
 // ============================================================================
+// Naive C0 Value → JSON emitter (no type prefix interpretation)
+// ============================================================================
+
+/// Convert any C0 Value to JSON text. All C0 strings become JSON strings —
+/// no type prefix interpretation. This is a one-way visibility/interop tool,
+/// not a round-trip codec.
+pub fn valueToJson(allocator: std.mem.Allocator, val: Value) ![]u8 {
+    var result: std.ArrayListUnmanaged(u8) = .{};
+    errdefer result.deinit(allocator);
+
+    try writeValueAsJson(allocator, &result, val, 0);
+    try result.append(allocator, '\n');
+
+    return result.toOwnedSlice(allocator);
+}
+
+fn writeValueAsJson(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), val: Value, depth: usize) !void {
+    switch (val) {
+        .string => |s| {
+            try out.append(allocator, '"');
+            try writeJsonStringEscaped(allocator, out, s);
+            try out.append(allocator, '"');
+        },
+        .array => |items| {
+            if (items.len == 0) {
+                try out.appendSlice(allocator, "[]");
+                return;
+            }
+            try out.appendSlice(allocator, "[\n");
+            for (items, 0..) |item, idx| {
+                try writeJsonIndent(allocator, out, depth + 1);
+                try writeValueAsJson(allocator, out, item, depth + 1);
+                if (idx < items.len - 1) try out.append(allocator, ',');
+                try out.append(allocator, '\n');
+            }
+            try writeJsonIndent(allocator, out, depth);
+            try out.append(allocator, ']');
+        },
+        .object => |entries| {
+            if (entries.len == 0) {
+                try out.appendSlice(allocator, "{}");
+                return;
+            }
+            try out.appendSlice(allocator, "{\n");
+            for (entries, 0..) |entry, idx| {
+                try writeJsonIndent(allocator, out, depth + 1);
+                try out.append(allocator, '"');
+                try writeJsonStringEscaped(allocator, out, entry.key);
+                try out.appendSlice(allocator, "\": ");
+                try writeValueAsJson(allocator, out, entry.value, depth + 1);
+                if (idx < entries.len - 1) try out.append(allocator, ',');
+                try out.append(allocator, '\n');
+            }
+            try writeJsonIndent(allocator, out, depth);
+            try out.append(allocator, '}');
+        },
+    }
+}
+
+fn writeJsonIndent(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), depth: usize) !void {
+    for (0..depth) |_| {
+        try out.appendSlice(allocator, "  ");
+    }
+}
+
+fn writeJsonStringEscaped(allocator: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '"' => try out.appendSlice(allocator, "\\\""),
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '\r' => try out.appendSlice(allocator, "\\r"),
+            '\t' => try out.appendSlice(allocator, "\\t"),
+            0x08 => try out.appendSlice(allocator, "\\b"),
+            0x0C => try out.appendSlice(allocator, "\\f"),
+            0x00...0x07, 0x0B, 0x0E...0x1F => {
+                var buf: [6]u8 = undefined;
+                _ = std.fmt.bufPrint(&buf, "\\u{X:0>4}", .{c}) catch unreachable;
+                try out.appendSlice(allocator, &buf);
+            },
+            else => try out.append(allocator, c),
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

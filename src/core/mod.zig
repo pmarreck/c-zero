@@ -35,6 +35,11 @@ pub const DecodeError = decoder.DecodeError;
 pub const json_content = @import("json_content.zig");
 pub const JsonValue = json_content.JsonValue;
 pub const JsonEntry = json_content.JsonEntry;
+pub const valueToJson = json_content.valueToJson;
+
+pub const query = @import("query.zig");
+pub const queryValue = query.queryValue;
+pub const parsePath = query.parsePath;
 
 test {
     _ = value;
@@ -42,5 +47,6 @@ test {
     _ = encoder;
     _ = decoder;
     _ = json_content;
+    _ = query;
     _ = @import("roundtrip_test.zig");
 }

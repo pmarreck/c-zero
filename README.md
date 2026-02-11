@@ -267,6 +267,38 @@ c0 expand myfile.png          # auto-detected from magic bytes
 c0 expand --codec png myfile  # explicit codec selection
 ```
 
+### Query & Transform (`get`, `set`, `to-json`)
+
+**`c0 get`** extracts values by jq-style path — strings are printed raw, structures as compact C0:
+```bash
+c0 expand data.json | c0 get .value.name
+# Alice
+
+c0 expand data.json | c0 get .value.scores[0]
+# i100
+
+c0 expand data.json | c0 get .format
+# json
+```
+
+**`c0 set`** replaces a value at a path and emits the updated C0:
+```bash
+c0 expand data.json | c0 set .value.name Bob > updated.c0
+c0 expand data.json | c0 set .value.scores[0] i999 | c0 collapse > modified.json
+```
+
+**`c0 to-json`** converts any C0 data to JSON for interop with tools like `jq`. This is a **naive one-way conversion** — all C0 strings become JSON strings with no type interpretation:
+```bash
+c0 expand image.png | c0 to-json | jq '.chunks[0].type'
+# "IHDR"
+
+c0 expand data.json | c0 to-json
+# {"format": "json", "value": {"name": "\"Alice", "age": "i30", ...}}
+#                                       ^--- type prefix is literal
+```
+
+> **`to-json` vs JSON codec**: The `json` codec (`c0 expand/collapse`) does type-preserving round-trips using prefixes (`"` = string, `i` = int, `f` = float, `bT`/`bF` = bool, `n` = null). The `to-json` command is a dumb pipe — it turns any C0 into valid JSON for external tools, but doesn't interpret or strip type prefixes. Use the codec for JSON editing, `to-json` for interop.
+
 ### External Codecs (Subprocess Protocol)
 
 You can extend C0 with your own codecs. Place an executable named `c0-codec-<name>` in `~/.c0/codecs/` or anywhere on your `PATH`. It must support three subcommands:

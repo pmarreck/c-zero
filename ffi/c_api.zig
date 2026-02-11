@@ -471,6 +471,112 @@ export fn c0_codec_info(index: usize) C0CodecInfo {
     };
 }
 
+/// Convert C0 data to JSON (naive — all strings become JSON strings, no type interpretation).
+/// Returns JSON bytes, or NULL on failure.
+export fn c0_to_json(
+    arena: ?*C0Arena,
+    c0_data: ?[*]const u8,
+    c0_len: usize,
+    out_len: ?*usize,
+) ?[*]u8 {
+    const a = arena orelse return null;
+    const d = c0_data orelse return null;
+    const state = a.toInternal();
+    const allocator = state.allocator();
+
+    // Decode C0 text to Value
+    const value = core.decode(allocator, d[0..c0_len]) catch return null;
+
+    // Convert to JSON
+    const json_bytes = core.valueToJson(allocator, value) catch return null;
+
+    if (out_len) |lp| {
+        lp.* = json_bytes.len;
+    }
+    return json_bytes.ptr;
+}
+
+/// Query a path in C0 data, returning the result.
+/// For strings: returns raw string bytes.
+/// For arrays/objects: returns compact C0 text.
+/// Returns NULL if the path is invalid or doesn't match.
+export fn c0_get(
+    arena: ?*C0Arena,
+    c0_data: ?[*]const u8,
+    c0_len: usize,
+    path: ?[*]const u8,
+    path_len: usize,
+    out_len: ?*usize,
+) ?[*]u8 {
+    const a = arena orelse return null;
+    const d = c0_data orelse return null;
+    const p = path orelse return null;
+    const state = a.toInternal();
+    const allocator = state.allocator();
+
+    // Decode C0 text to Value
+    const value = core.decode(allocator, d[0..c0_len]) catch return null;
+
+    // Parse path
+    const segments = core.parsePath(allocator, p[0..path_len]) catch return null;
+
+    // Traverse
+    const result = core.queryValue(value, segments) orelse return null;
+
+    // Format result
+    const output = core.query.formatResult(allocator, result) catch return null;
+
+    if (out_len) |lp| {
+        lp.* = output.len;
+    }
+    return output.ptr;
+}
+
+/// Set a value at a path in C0 data, returning new C0 text.
+/// path: jq-style path (e.g., ".name", ".users[0].age")
+/// new_value_c0: the new value as C0 text (e.g., "hello" for a string, "[a,b]" for an array)
+/// Returns new C0 text with the value replaced, or NULL on failure.
+export fn c0_set(
+    arena: ?*C0Arena,
+    c0_data: ?[*]const u8,
+    c0_len: usize,
+    path_ptr: ?[*]const u8,
+    path_len: usize,
+    new_value_c0: ?[*]const u8,
+    new_value_len: usize,
+    pretty: c_int,
+    out_len: ?*usize,
+) ?[*]u8 {
+    const a = arena orelse return null;
+    const d = c0_data orelse return null;
+    const p = path_ptr orelse return null;
+    const nv = new_value_c0 orelse return null;
+    const state = a.toInternal();
+    const allocator = state.allocator();
+
+    // Decode the root C0 data
+    const root = core.decode(allocator, d[0..c0_len]) catch return null;
+
+    // Decode the new value
+    const new_val = core.decode(allocator, nv[0..new_value_len]) catch return null;
+
+    // Parse path
+    const segments = core.parsePath(allocator, p[0..path_len]) catch return null;
+
+    // Set value
+    const updated = core.query.setValue(allocator, root, segments, new_val) catch return null;
+
+    // Re-encode
+    const output = core.encodeWithOptions(allocator, updated, .{
+        .pretty = pretty != 0,
+    }) catch return null;
+
+    if (out_len) |lp| {
+        lp.* = output.len;
+    }
+    return output.ptr;
+}
+
 // ============================================================================
 // Internal Helpers
 // ============================================================================

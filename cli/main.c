@@ -42,6 +42,9 @@ static int cmd_decode(void);
 static int cmd_expand(int argc, char* argv[]);
 static int cmd_collapse(int argc, char* argv[]);
 static int cmd_codecs(void);
+static int cmd_to_json(int argc, char* argv[]);
+static int cmd_get(int argc, char* argv[]);
+static int cmd_set(int argc, char* argv[]);
 static void pretty_print(const C0Value* val, int indent);
 static char* read_stdin(size_t* out_len);
 static char* read_file(const char* path, size_t* out_len);
@@ -286,6 +289,12 @@ int main(int argc, char* argv[]) {
         return cmd_collapse(argc, argv);
     } else if (strcmp(argv[1], "codecs") == 0) {
         return cmd_codecs();
+    } else if (strcmp(argv[1], "to-json") == 0) {
+        return cmd_to_json(argc, argv);
+    } else if (strcmp(argv[1], "get") == 0) {
+        return cmd_get(argc, argv);
+    } else if (strcmp(argv[1], "set") == 0) {
+        return cmd_set(argc, argv);
     } else {
         fprintf(stderr, "Error: Unknown command '%s'\n\n", argv[1]);
         print_usage(argv[0]);
@@ -303,6 +312,9 @@ static void print_usage(const char* program_name) {
     fprintf(stderr, "  decode              Read C0 binary from stdin, pretty-print to stdout\n");
     fprintf(stderr, "  expand [opts] <file>  Expand binary file to C0 text on stdout\n");
     fprintf(stderr, "  collapse [opts] [file] Collapse C0 text back to native format on stdout\n");
+    fprintf(stderr, "  to-json [file]      Convert C0 text to JSON (naive, all strings as JSON strings)\n");
+    fprintf(stderr, "  get <path> [file]   Query a value by jq-style path (e.g., .key[0].name)\n");
+    fprintf(stderr, "  set <path> <value> [file]  Set a value at path, emit updated C0\n");
     fprintf(stderr, "  codecs              List available codecs\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Expand/Collapse options:\n");
@@ -320,6 +332,9 @@ static void print_usage(const char* program_name) {
     fprintf(stderr, "  %s collapse image.c0 > roundtrip.png\n", program_name);
     fprintf(stderr, "  %s expand --editable image.png | %s collapse --editable > edited.png\n",
             program_name, program_name);
+    fprintf(stderr, "  %s to-json image.c0\n", program_name);
+    fprintf(stderr, "  %s get .format image.c0\n", program_name);
+    fprintf(stderr, "  %s set .name Alice image.c0 > updated.c0\n", program_name);
     fprintf(stderr, "  %s codecs\n", program_name);
 }
 
@@ -813,6 +828,161 @@ static int cmd_codecs(void) {
     }
 #endif
 
+    return 0;
+}
+
+/**
+ * to-json command: convert C0 text to JSON (naive, all strings as JSON strings)
+ * Usage: c0 to-json [file]
+ * If no file given, reads from stdin.
+ */
+static int cmd_to_json(int argc, char* argv[]) {
+    char* data;
+    size_t data_len;
+
+    if (argc > 2) {
+        data = read_file(argv[2], &data_len);
+    } else {
+        data = read_stdin(&data_len);
+    }
+    if (!data) return 1;
+
+    C0Arena* arena = c0_arena_new();
+    if (!arena) {
+        fprintf(stderr, "Error: Failed to create arena\n");
+        free(data);
+        return 1;
+    }
+
+    size_t json_len;
+    uint8_t* json = c0_to_json(arena, (const uint8_t*)data, data_len, &json_len);
+    if (!json) {
+        fprintf(stderr, "Error: Failed to convert C0 to JSON\n");
+        c0_arena_free(arena);
+        free(data);
+        return 1;
+    }
+
+    fwrite(json, 1, json_len, stdout);
+
+    c0_arena_free(arena);
+    free(data);
+    return 0;
+}
+
+/**
+ * get command: query a value by jq-style path
+ * Usage: c0 get <path> [file]
+ * If no file given, reads from stdin.
+ */
+static int cmd_get(int argc, char* argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Error: get requires a path argument\n");
+        fprintf(stderr, "Usage: c0 get <path> [file]\n");
+        return 1;
+    }
+
+    const char* path = argv[2];
+    char* data;
+    size_t data_len;
+
+    if (argc > 3) {
+        data = read_file(argv[3], &data_len);
+    } else {
+        data = read_stdin(&data_len);
+    }
+    if (!data) return 1;
+
+    C0Arena* arena = c0_arena_new();
+    if (!arena) {
+        fprintf(stderr, "Error: Failed to create arena\n");
+        free(data);
+        return 1;
+    }
+
+    size_t result_len;
+    uint8_t* result = c0_get(arena,
+        (const uint8_t*)data, data_len,
+        path, strlen(path),
+        &result_len);
+
+    if (!result) {
+        fprintf(stderr, "Error: Path '%s' not found or invalid\n", path);
+        c0_arena_free(arena);
+        free(data);
+        return 1;
+    }
+
+    fwrite(result, 1, result_len, stdout);
+
+    c0_arena_free(arena);
+    free(data);
+    return 0;
+}
+
+/**
+ * set command: set a value at a path, emit updated C0
+ * Usage: c0 set <path> <value> [--compact] [file]
+ * If no file given, reads from stdin.
+ * The value is raw C0 text (e.g., "hello" for a string, "[a,b]" for an array).
+ */
+static int cmd_set(int argc, char* argv[]) {
+    if (argc < 4) {
+        fprintf(stderr, "Error: set requires a path and value\n");
+        fprintf(stderr, "Usage: c0 set <path> <value> [--compact] [file]\n");
+        return 1;
+    }
+
+    const char* path = argv[2];
+    const char* new_value = argv[3];
+    int pretty = 1;
+    const char* filepath = NULL;
+
+    /* Parse remaining arguments */
+    for (int i = 4; i < argc; i++) {
+        if (strcmp(argv[i], "--compact") == 0) {
+            pretty = 0;
+        } else {
+            filepath = argv[i];
+        }
+    }
+
+    char* data;
+    size_t data_len;
+
+    if (filepath) {
+        data = read_file(filepath, &data_len);
+    } else {
+        data = read_stdin(&data_len);
+    }
+    if (!data) return 1;
+
+    C0Arena* arena = c0_arena_new();
+    if (!arena) {
+        fprintf(stderr, "Error: Failed to create arena\n");
+        free(data);
+        return 1;
+    }
+
+    size_t result_len;
+    uint8_t* result = c0_set(arena,
+        (const uint8_t*)data, data_len,
+        path, strlen(path),
+        (const uint8_t*)new_value, strlen(new_value),
+        pretty,
+        &result_len);
+
+    if (!result) {
+        fprintf(stderr, "Error: Failed to set value at path '%s'\n", path);
+        c0_arena_free(arena);
+        free(data);
+        return 1;
+    }
+
+    fwrite(result, 1, result_len, stdout);
+
+    c0_arena_free(arena);
+    free(data);
     return 0;
 }
 

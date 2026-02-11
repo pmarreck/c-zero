@@ -117,6 +117,35 @@ size_t c0_codec_count(void);
 /** Get info for codec at index */
 C0CodecInfo c0_codec_info(size_t index);
 
+/* Utility operations */
+
+/** Convert C0 data to JSON (naive — all strings become JSON strings, no type interpretation).
+ *  Returns JSON bytes, or NULL on failure */
+uint8_t* c0_to_json(C0Arena* arena,
+    const uint8_t* c0_data, size_t c0_len,
+    size_t* out_len);
+
+/** Query a path in C0 data (jq-style: ".key[0].key2").
+ *  For strings: returns raw string bytes + newline.
+ *  For arrays/objects: returns compact C0 text + newline.
+ *  Returns NULL if path is invalid or doesn't match */
+uint8_t* c0_get(C0Arena* arena,
+    const uint8_t* c0_data, size_t c0_len,
+    const char* path, size_t path_len,
+    size_t* out_len);
+
+/** Set a value at a path in C0 data, returning new C0 text.
+ *  path: jq-style path (e.g., ".name", ".users[0].age")
+ *  new_value_c0: the new value as C0 text
+ *  pretty: 1=pretty-print, 0=compact
+ *  Returns new C0 text with the value replaced, or NULL on failure */
+uint8_t* c0_set(C0Arena* arena,
+    const uint8_t* c0_data, size_t c0_len,
+    const char* path, size_t path_len,
+    const uint8_t* new_value_c0, size_t new_value_len,
+    int pretty,
+    size_t* out_len);
+
 #ifdef __cplusplus
 }
 #endif
