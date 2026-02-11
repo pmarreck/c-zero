@@ -186,6 +186,7 @@ The "PNG" and "Hello from binary!" parts remain readable, while control bytes be
 4. **Data archives** - Bundle files with readable metadata
 5. **JSON alternative** - When you need binary support without base64
 6. **Test suites** - Include binary snippets directly in test fixtures as readable text, assert on binary outputs, or provide binary inputs to processes — no more hex dumps or base64 blobs in your test data
+7. **UTF-8 debugging** - Make normally-invisible characters visible using printable-binary encoding — control characters, zero-width spaces, directional overrides, and other non-printing codepoints become distinct readable glyphs
 
 ## Codec System
 
@@ -197,6 +198,7 @@ C0 includes a codec plugin architecture that transforms binary file formats into
 |-------|-----------|-------|-------------|
 | `png` | `.png` | faithful, editable | PNG image format (lossless chunk destructuring) |
 | `bg3` | `.lsv`, `.pak`, `.lsf` | faithful | Baldur's Gate 3 save files (LSPK packages and LSF data) |
+| `json` | `.json` | faithful, editable | JSON format (bidirectional with type-prefixed scalars) |
 
 ### Expand / Collapse
 
@@ -213,6 +215,24 @@ c0 expand image.png
 # 	]
 # }
 ```
+
+**Expand** also works for text formats like JSON, using type prefixes instead of printable-binary encoding:
+```bash
+c0 expand data.json
+# Output:
+# {
+# 	format:json,
+# 	value:{
+# 		name:˵Alice,
+# 		age:i30,
+# 		scores:[i100,f95.5],
+# 		active:bT,
+# 		notes:n
+# 	}
+# }
+```
+
+Type prefixes: `"` = string, `i` = integer, `f` = float, `bT`/`bF` = boolean, `n` = null.
 
 **Collapse** converts C0 text back to the native format:
 ```bash
@@ -263,6 +283,17 @@ The `info` subcommand outputs C0-formatted metadata:
 ```
 
 Built-in codecs always take priority over subprocess codecs with the same name. Subprocess codecs are discovered automatically and listed by `c0 codecs`.
+
+### Future Codecs
+
+Interesting candidates for built-in or community codecs:
+
+- **PDF** - Document structure, page objects, embedded fonts/images
+- **JPEG XL** - Next-gen image format with rich metadata and progressive layers
+- **Dead Cells** (save files) - Roguelike game save data editing
+- **SQLite** - Database file format with tables, indexes, and pages
+- **WASM** - WebAssembly module structure (sections, functions, imports)
+- **Protocol Buffers** - Binary-encoded protobuf messages with schema-aware expansion
 
 ## Demos
 

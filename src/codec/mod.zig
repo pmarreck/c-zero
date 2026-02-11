@@ -10,6 +10,7 @@ const Value = core.Value;
 
 pub const png = @import("png.zig");
 pub const bg3 = @import("bg3/mod.zig");
+pub const json = @import("json.zig");
 
 /// Error type for codec operations
 pub const CodecError = error{
@@ -191,10 +192,12 @@ pub const Registry = struct {
 /// Built-in codec registry
 var png_instance = png.PngCodec{};
 var bg3_instance = bg3.Bg3Codec{};
+var json_instance = json.JsonCodec{};
 
 pub const builtin_codecs = [_]Codec{
     Codec.init(&png_instance),
     Codec.init(&bg3_instance),
+    Codec.init(&json_instance),
 };
 
 pub const builtin_registry = Registry{
@@ -243,4 +246,5 @@ test "registry returns null for unrecognized data" {
 test {
     _ = png;
     _ = bg3;
+    _ = json;
 }
