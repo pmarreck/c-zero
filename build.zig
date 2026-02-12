@@ -4,12 +4,19 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // External dependency
+    // External dependencies
     const pb_dep = b.dependency("printable_binary", .{
         .target = target,
         .optimize = optimize,
     });
     const pb_mod = pb_dep.module("printable_binary");
+
+    // zlib for PDF FlateDecode (zlib license, allyourcodebase/zlib)
+    const zlib_dep = b.dependency("zlib", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const zlib_lib = zlib_dep.artifact("z");
 
     // Core module
     const core_mod = b.addModule("c0_core", .{
@@ -52,6 +59,8 @@ pub fn build(b: *std.Build) void {
         .file = b.path("lib/zstd/zstd.c"),
         .flags = &.{"-std=c99"},
     });
+    // zlib include path for PDF codec's @cImport("zlib.h")
+    codec_mod.addIncludePath(zlib_lib.getEmittedIncludeTree());
 
     // FFI module
     const ffi_mod = b.addModule("c0_ffi", .{
@@ -79,6 +88,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     lib.installHeader(b.path("ffi/c0.h"), "c0.h");
+    lib.linkLibrary(zlib_lib);
     b.installArtifact(lib);
 
     // C CLI executable
@@ -122,6 +132,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    ffi_tests.linkLibrary(zlib_lib);
 
     // Codec tests
     const codec_test_mod = b.createModule(.{
@@ -154,9 +165,12 @@ pub fn build(b: *std.Build) void {
         .file = b.path("lib/zstd/zstd.c"),
         .flags = &.{"-std=c99"},
     });
+    // zlib include path for PDF codec tests
+    codec_test_mod.addIncludePath(zlib_lib.getEmittedIncludeTree());
     const codec_tests = b.addTest(.{
         .root_module = codec_test_mod,
     });
+    codec_tests.linkLibrary(zlib_lib);
 
     const run_core_tests = b.addRunArtifact(core_tests);
     const run_ffi_tests = b.addRunArtifact(ffi_tests);

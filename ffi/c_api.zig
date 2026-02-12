@@ -325,6 +325,16 @@ export fn c0_decode(arena: ?*C0Arena, data: ?[*]const u8, len: usize) ?*C0Value 
 // Codec Operations
 // ============================================================================
 
+/// C-compatible codec argument descriptor
+pub const C0CodecArg = extern struct {
+    name: [*]const u8,
+    name_len: usize,
+    description: [*]const u8,
+    description_len: usize,
+    value_name: [*]const u8,
+    value_name_len: usize,
+};
+
 /// C-compatible codec info struct
 pub const C0CodecInfo = extern struct {
     name: [*]const u8,
@@ -333,6 +343,10 @@ pub const C0CodecInfo = extern struct {
     description_len: usize,
     supports_faithful: c_int,
     supports_editable: c_int,
+    help: [*]const u8,
+    help_len: usize,
+    custom_args: ?[*]const C0CodecArg,
+    custom_args_count: usize,
 };
 
 /// Expand: file bytes -> C0 text
@@ -340,6 +354,7 @@ pub const C0CodecInfo = extern struct {
 /// filename: NULL if unknown, used for extension matching
 /// faithful: 1=faithful, 0=editable
 /// pretty: 1=pretty-print with tabs/newlines, 0=compact
+/// extra_keys/extra_values/extra_count: codec-specific key-value arguments
 export fn c0_codec_expand(
     arena: ?*C0Arena,
     codec_name: ?[*]const u8,
@@ -350,6 +365,11 @@ export fn c0_codec_expand(
     len: usize,
     faithful: c_int,
     pretty: c_int,
+    extra_keys: ?[*]const [*]const u8,
+    extra_key_lens: ?[*]const usize,
+    extra_values: ?[*]const [*]const u8,
+    extra_value_lens: ?[*]const usize,
+    extra_count: usize,
     out_len: ?*usize,
 ) ?[*]u8 {
     const a = arena orelse return null;
@@ -368,7 +388,20 @@ export fn c0_codec_expand(
         }
     } orelse return null;
 
-    const options = codec_mod.CodecOptions{ .faithful = faithful != 0 };
+    // Build codec args from extra key/value arrays
+    var options = codec_mod.CodecOptions{ .faithful = faithful != 0 };
+    if (extra_count > 0) {
+        if (extra_keys != null and extra_key_lens != null and extra_values != null and extra_value_lens != null) {
+            const codec_args = allocator.alloc(codec_mod.CodecArgValue, extra_count) catch return null;
+            for (0..extra_count) |i| {
+                codec_args[i] = .{
+                    .key = extra_keys.?[i][0..extra_key_lens.?[i]],
+                    .value = extra_values.?[i][0..extra_value_lens.?[i]],
+                };
+            }
+            options.codec_args = codec_args;
+        }
+    }
 
     // Expand to Value
     const value = found_codec.expand(allocator, d[0..len], options) catch return null;
@@ -387,6 +420,7 @@ export fn c0_codec_expand(
 /// Collapse: C0 text -> file bytes
 /// codec_name: NULL = infer from C0 "format" field
 /// faithful: 1=faithful, 0=editable
+/// extra_keys/extra_values/extra_count: codec-specific key-value arguments
 export fn c0_codec_collapse(
     arena: ?*C0Arena,
     codec_name: ?[*]const u8,
@@ -394,6 +428,11 @@ export fn c0_codec_collapse(
     c0_data: ?[*]const u8,
     c0_len: usize,
     faithful: c_int,
+    extra_keys: ?[*]const [*]const u8,
+    extra_key_lens: ?[*]const usize,
+    extra_values: ?[*]const [*]const u8,
+    extra_value_lens: ?[*]const usize,
+    extra_count: usize,
     out_len: ?*usize,
 ) ?[*]u8 {
     const a = arena orelse return null;
@@ -415,7 +454,20 @@ export fn c0_codec_collapse(
         }
     } orelse return null;
 
-    const options = codec_mod.CodecOptions{ .faithful = faithful != 0 };
+    // Build codec args from extra key/value arrays
+    var options = codec_mod.CodecOptions{ .faithful = faithful != 0 };
+    if (extra_count > 0) {
+        if (extra_keys != null and extra_key_lens != null and extra_values != null and extra_value_lens != null) {
+            const codec_args = allocator.alloc(codec_mod.CodecArgValue, extra_count) catch return null;
+            for (0..extra_count) |i| {
+                codec_args[i] = .{
+                    .key = extra_keys.?[i][0..extra_key_lens.?[i]],
+                    .value = extra_values.?[i][0..extra_value_lens.?[i]],
+                };
+            }
+            options.codec_args = codec_args;
+        }
+    }
 
     // Collapse Value to native bytes
     const native_bytes = found_codec.collapse(allocator, value, options) catch return null;
@@ -448,7 +500,8 @@ export fn c0_codec_count() usize {
 }
 
 /// Get info for codec at index
-export fn c0_codec_info(index: usize) C0CodecInfo {
+/// arena: optional arena for allocating custom_args array (pass NULL if not needed)
+export fn c0_codec_info(arena: ?*C0Arena, index: usize) C0CodecInfo {
     const registry = codec_mod.builtin_registry;
     if (index >= registry.codecs.len) {
         return .{
@@ -458,9 +511,49 @@ export fn c0_codec_info(index: usize) C0CodecInfo {
             .description_len = 0,
             .supports_faithful = 0,
             .supports_editable = 0,
+            .help = "",
+            .help_len = 0,
+            .custom_args = null,
+            .custom_args_count = 0,
         };
     }
     const info = registry.codecs[index].info();
+
+    // Convert custom_args if arena is provided and there are args
+    var c_args: ?[*]const C0CodecArg = null;
+    if (arena) |a| {
+        if (info.custom_args.len > 0) {
+            const state = a.toInternal();
+            const allocator = state.allocator();
+            const args = allocator.alloc(C0CodecArg, info.custom_args.len) catch {
+                c_args = null;
+                return .{
+                    .name = info.name.ptr,
+                    .name_len = info.name.len,
+                    .description = info.description.ptr,
+                    .description_len = info.description.len,
+                    .supports_faithful = if (info.supports_faithful) 1 else 0,
+                    .supports_editable = if (info.supports_editable) 1 else 0,
+                    .help = info.help.ptr,
+                    .help_len = info.help.len,
+                    .custom_args = null,
+                    .custom_args_count = 0,
+                };
+            };
+            for (info.custom_args, 0..) |arg, i| {
+                args[i] = .{
+                    .name = arg.name.ptr,
+                    .name_len = arg.name.len,
+                    .description = arg.description.ptr,
+                    .description_len = arg.description.len,
+                    .value_name = arg.value_name.ptr,
+                    .value_name_len = arg.value_name.len,
+                };
+            }
+            c_args = args.ptr;
+        }
+    }
+
     return .{
         .name = info.name.ptr,
         .name_len = info.name.len,
@@ -468,6 +561,10 @@ export fn c0_codec_info(index: usize) C0CodecInfo {
         .description_len = info.description.len,
         .supports_faithful = if (info.supports_faithful) 1 else 0,
         .supports_editable = if (info.supports_editable) 1 else 0,
+        .help = info.help.ptr,
+        .help_len = info.help.len,
+        .custom_args = c_args,
+        .custom_args_count = info.custom_args.len,
     };
 }
 

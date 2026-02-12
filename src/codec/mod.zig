@@ -12,6 +12,7 @@ pub const png = @import("png.zig");
 pub const bg3 = @import("bg3/mod.zig");
 pub const json = @import("json.zig");
 pub const exif = @import("exif/mod.zig");
+pub const pdf = @import("pdf/mod.zig");
 
 /// Error type for codec operations
 pub const CodecError = error{
@@ -35,6 +36,19 @@ pub const MagicPattern = struct {
     bytes: []const u8,
 };
 
+/// Declared custom argument for a codec
+pub const CodecArg = struct {
+    name: []const u8, // "pages"
+    description: []const u8, // "Page range to expand (e.g., 1-5, 3)"
+    value_name: []const u8, // "RANGE" (shown as --pages RANGE in help)
+};
+
+/// Runtime key-value pair for a codec-specific argument
+pub const CodecArgValue = struct {
+    key: []const u8,
+    value: []const u8,
+};
+
 /// Codec metadata
 pub const CodecInfo = struct {
     name: []const u8,
@@ -44,6 +58,8 @@ pub const CodecInfo = struct {
     format_names: []const []const u8, // format field values this codec handles on collapse
     supports_faithful: bool,
     supports_editable: bool,
+    help: []const u8 = "", // detailed help text
+    custom_args: []const CodecArg = &.{}, // declared custom arguments
 };
 
 /// Options controlling codec behavior
@@ -51,6 +67,16 @@ pub const CodecOptions = struct {
     /// true = bit-perfect round-trip (preserve all derived fields like CRC)
     /// false = editable mode (omit derived fields, recalculate on collapse)
     faithful: bool = true,
+    /// codec-specific arguments passed from CLI
+    codec_args: []const CodecArgValue = &.{},
+
+    /// Look up a codec-specific arg by name
+    pub fn getArg(self: CodecOptions, name: []const u8) ?[]const u8 {
+        for (self.codec_args) |kv| {
+            if (std.mem.eql(u8, kv.key, name)) return kv.value;
+        }
+        return null;
+    }
 };
 
 /// Runtime-polymorphic codec interface using Zig vtable pattern
@@ -196,6 +222,7 @@ var bg3_instance = bg3.Bg3Codec{};
 var json_instance = json.JsonCodec{};
 var jpeg_instance = exif.JpegCodec{};
 var tiff_instance = exif.TiffCodec{};
+var pdf_instance = pdf.PdfCodec{};
 
 pub const builtin_codecs = [_]Codec{
     Codec.init(&png_instance),
@@ -203,6 +230,7 @@ pub const builtin_codecs = [_]Codec{
     Codec.init(&json_instance),
     Codec.init(&jpeg_instance),
     Codec.init(&tiff_instance),
+    Codec.init(&pdf_instance),
 };
 
 pub const builtin_registry = Registry{
@@ -292,4 +320,5 @@ test {
     _ = bg3;
     _ = json;
     _ = exif;
+    _ = pdf;
 }

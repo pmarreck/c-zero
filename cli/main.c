@@ -41,7 +41,7 @@ static int cmd_encode(void);
 static int cmd_decode(void);
 static int cmd_expand(int argc, char* argv[]);
 static int cmd_collapse(int argc, char* argv[]);
-static int cmd_codecs(void);
+static int cmd_codecs(int argc, char* argv[]);
 static int cmd_to_json(int argc, char* argv[]);
 static int cmd_get(int argc, char* argv[]);
 static int cmd_set(int argc, char* argv[]);
@@ -90,7 +90,7 @@ static void add_subprocess_codec(const char* name, const char* path) {
     /* Skip if name matches a built-in codec */
     size_t builtin_count = c0_codec_count();
     for (size_t i = 0; i < builtin_count; i++) {
-        C0CodecInfo info = c0_codec_info(i);
+        C0CodecInfo info = c0_codec_info(NULL, i);
         if (strlen(name) == info.name_len &&
             memcmp(name, info.name, info.name_len) == 0) {
             return;
@@ -173,10 +173,14 @@ static const SubprocessCodec* find_subprocess_codec(const char* name) {
 
 /**
  * Run a subprocess codec command, piping input to stdin and capturing stdout.
+ * extra_keys/extra_values/extra_count: codec-specific --key value pairs to forward.
  * Returns malloc'd output buffer (caller must free), or NULL on error.
  */
 static char* run_subprocess_codec(const char* exe_path, const char* subcommand,
                                   int editable,
+                                  const char** extra_keys, size_t* extra_key_lens,
+                                  const char** extra_values, size_t* extra_value_lens,
+                                  size_t extra_count,
                                   const void* input, size_t input_len,
                                   size_t* output_len) {
     int stdin_pipe[2] = {-1, -1};
@@ -203,11 +207,39 @@ static char* run_subprocess_codec(const char* exe_path, const char* subcommand,
         close(stdin_pipe[0]);
         close(stdout_pipe[1]);
 
+        /* Build argv: exe subcommand [--editable] [--key value ...] NULL */
+        /* Max args: exe + subcommand + --editable + 2*extra_count + NULL */
+        size_t max_args = 3 + 2 * extra_count + 1;
+        char** child_argv = malloc(max_args * sizeof(char*));
+        if (!child_argv) _exit(127);
+
+        size_t ai = 0;
+        child_argv[ai++] = (char*)exe_path;
+        child_argv[ai++] = (char*)subcommand;
         if (editable) {
-            execl(exe_path, exe_path, subcommand, "--editable", (char*)NULL);
-        } else {
-            execl(exe_path, exe_path, subcommand, (char*)NULL);
+            child_argv[ai++] = "--editable";
         }
+        for (size_t i = 0; i < extra_count; i++) {
+            /* Build --key string (null-terminated) */
+            size_t klen = extra_key_lens[i];
+            char* flag = malloc(2 + klen + 1);
+            if (!flag) _exit(127);
+            flag[0] = '-'; flag[1] = '-';
+            memcpy(flag + 2, extra_keys[i], klen);
+            flag[2 + klen] = '\0';
+            child_argv[ai++] = flag;
+
+            /* Build value string (null-terminated) */
+            size_t vlen = extra_value_lens[i];
+            char* val = malloc(vlen + 1);
+            if (!val) _exit(127);
+            memcpy(val, extra_values[i], vlen);
+            val[vlen] = '\0';
+            child_argv[ai++] = val;
+        }
+        child_argv[ai] = NULL;
+
+        execv(exe_path, child_argv);
         _exit(127);
     }
 
@@ -288,7 +320,7 @@ int main(int argc, char* argv[]) {
     } else if (strcmp(argv[1], "collapse") == 0) {
         return cmd_collapse(argc, argv);
     } else if (strcmp(argv[1], "codecs") == 0) {
-        return cmd_codecs();
+        return cmd_codecs(argc, argv);
     } else if (strcmp(argv[1], "to-json") == 0) {
         return cmd_to_json(argc, argv);
     } else if (strcmp(argv[1], "get") == 0) {
@@ -315,7 +347,7 @@ static void print_usage(const char* program_name) {
     fprintf(stderr, "  to-json [file]      Convert C0 text to JSON (naive, all strings as JSON strings)\n");
     fprintf(stderr, "  get <path> [opts] [file]  Query a value by jq-style path (e.g., .key[0].name)\n");
     fprintf(stderr, "  set <path> <val> [opts] [file]  Set a value at path, emit updated C0\n");
-    fprintf(stderr, "  codecs              List available codecs\n");
+    fprintf(stderr, "  codecs [name]       List codecs, or show detailed help for one codec\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Expand/Collapse options:\n");
     fprintf(stderr, "  --codec <name>      Use specific codec (default: auto-detect)\n");
@@ -545,6 +577,14 @@ static int cmd_expand(int argc, char* argv[]) {
     int pretty = 1; /* pretty-print by default */
     const char* filepath = NULL;
 
+    /* Codec-specific extra args (unknown --flag value pairs) */
+    #define MAX_EXTRA_ARGS 32
+    const char* extra_keys[MAX_EXTRA_ARGS];
+    size_t extra_key_lens[MAX_EXTRA_ARGS];
+    const char* extra_values[MAX_EXTRA_ARGS];
+    size_t extra_value_lens[MAX_EXTRA_ARGS];
+    size_t extra_count = 0;
+
     /* Parse arguments after "expand" */
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--codec") == 0) {
@@ -558,6 +598,22 @@ static int cmd_expand(int argc, char* argv[]) {
             faithful = 0;
         } else if (strcmp(argv[i], "--compact") == 0) {
             pretty = 0;
+        } else if (strncmp(argv[i], "--", 2) == 0) {
+            /* Unknown --flag: treat as codec-specific arg */
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: %s requires a value\n", argv[i]);
+                return 1;
+            }
+            if (extra_count >= MAX_EXTRA_ARGS) {
+                fprintf(stderr, "Error: Too many extra arguments (max %d)\n", MAX_EXTRA_ARGS);
+                return 1;
+            }
+            extra_keys[extra_count] = argv[i] + 2; /* skip "--" */
+            extra_key_lens[extra_count] = strlen(argv[i] + 2);
+            extra_values[extra_count] = argv[i + 1];
+            extra_value_lens[extra_count] = strlen(argv[i + 1]);
+            extra_count++;
+            i++; /* skip value */
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
             return 1;
@@ -593,6 +649,11 @@ static int cmd_expand(int argc, char* argv[]) {
         (const uint8_t*)data, data_len,
         faithful,
         pretty,
+        extra_count > 0 ? extra_keys : NULL,
+        extra_count > 0 ? extra_key_lens : NULL,
+        extra_count > 0 ? extra_values : NULL,
+        extra_count > 0 ? extra_value_lens : NULL,
+        extra_count,
         &c0_len);
 
     if (!c0_data) {
@@ -606,6 +667,11 @@ static int cmd_expand(int argc, char* argv[]) {
             size_t sub_out_len;
             char* sub_out = run_subprocess_codec(sub->path, "expand",
                                                  !faithful,
+                                                 extra_count > 0 ? extra_keys : NULL,
+                                                 extra_count > 0 ? extra_key_lens : NULL,
+                                                 extra_count > 0 ? extra_values : NULL,
+                                                 extra_count > 0 ? extra_value_lens : NULL,
+                                                 extra_count,
                                                  data, data_len,
                                                  &sub_out_len);
             if (sub_out) {
@@ -667,6 +733,13 @@ static int cmd_collapse(int argc, char* argv[]) {
     int faithful = 1;
     const char* filepath = NULL;
 
+    /* Codec-specific extra args (unknown --flag value pairs) */
+    const char* extra_keys[MAX_EXTRA_ARGS];
+    size_t extra_key_lens[MAX_EXTRA_ARGS];
+    const char* extra_values[MAX_EXTRA_ARGS];
+    size_t extra_value_lens[MAX_EXTRA_ARGS];
+    size_t extra_count = 0;
+
     /* Parse arguments after "collapse" */
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--codec") == 0) {
@@ -678,6 +751,22 @@ static int cmd_collapse(int argc, char* argv[]) {
             codec_name_len = strlen(codec_name);
         } else if (strcmp(argv[i], "--editable") == 0) {
             faithful = 0;
+        } else if (strncmp(argv[i], "--", 2) == 0) {
+            /* Unknown --flag: treat as codec-specific arg */
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: %s requires a value\n", argv[i]);
+                return 1;
+            }
+            if (extra_count >= MAX_EXTRA_ARGS) {
+                fprintf(stderr, "Error: Too many extra arguments (max %d)\n", MAX_EXTRA_ARGS);
+                return 1;
+            }
+            extra_keys[extra_count] = argv[i] + 2; /* skip "--" */
+            extra_key_lens[extra_count] = strlen(argv[i] + 2);
+            extra_values[extra_count] = argv[i + 1];
+            extra_value_lens[extra_count] = strlen(argv[i + 1]);
+            extra_count++;
+            i++; /* skip value */
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
             return 1;
@@ -716,6 +805,11 @@ static int cmd_collapse(int argc, char* argv[]) {
         codec_name, codec_name_len,
         (const uint8_t*)c0_data, c0_len,
         faithful,
+        extra_count > 0 ? extra_keys : NULL,
+        extra_count > 0 ? extra_key_lens : NULL,
+        extra_count > 0 ? extra_values : NULL,
+        extra_count > 0 ? extra_value_lens : NULL,
+        extra_count,
         &out_len);
 
     if (!native_data) {
@@ -755,6 +849,11 @@ static int cmd_collapse(int argc, char* argv[]) {
             size_t sub_out_len;
             char* sub_out = run_subprocess_codec(sub->path, "collapse",
                                                  !faithful,
+                                                 extra_count > 0 ? extra_keys : NULL,
+                                                 extra_count > 0 ? extra_key_lens : NULL,
+                                                 extra_count > 0 ? extra_values : NULL,
+                                                 extra_count > 0 ? extra_value_lens : NULL,
+                                                 extra_count,
                                                  c0_data, c0_len,
                                                  &sub_out_len);
             if (sub_out) {
@@ -798,17 +897,79 @@ static int cmd_collapse(int argc, char* argv[]) {
 }
 
 /**
- * Codecs command: list available codecs
+ * Codecs command: list available codecs or show per-codec help
+ * Usage: c0 codecs [name]
  */
-static int cmd_codecs(void) {
+static int cmd_codecs(int argc, char* argv[]) {
     size_t count = c0_codec_count();
 
+    /* If a codec name is given, show detailed help for that codec */
+    if (argc > 2) {
+        const char* name = argv[2];
+        size_t name_len = strlen(name);
+
+        /* Create arena for custom_args */
+        C0Arena* arena = c0_arena_new();
+
+        for (size_t i = 0; i < count; i++) {
+            C0CodecInfo info = c0_codec_info(arena, i);
+            if (info.name_len == name_len &&
+                memcmp(info.name, name, name_len) == 0) {
+                /* Found it — print detailed help */
+                printf("%.*s", (int)info.name_len, info.name);
+
+                /* Modes */
+                if (info.supports_faithful && info.supports_editable) {
+                    printf("  [faithful, editable]");
+                } else if (info.supports_faithful) {
+                    printf("  [faithful]");
+                } else if (info.supports_editable) {
+                    printf("  [editable]");
+                }
+                printf("\n");
+
+                printf("  %.*s\n", (int)info.description_len, info.description);
+
+                /* Custom args */
+                if (info.custom_args_count > 0) {
+                    printf("\nOptions:\n");
+                    for (size_t j = 0; j < info.custom_args_count; j++) {
+                        const C0CodecArg* arg = &info.custom_args[j];
+                        printf("  --%.*s %.*s",
+                            (int)arg->name_len, arg->name,
+                            (int)arg->value_name_len, arg->value_name);
+                        /* Pad to align descriptions */
+                        int used = 4 + (int)arg->name_len + 1 + (int)arg->value_name_len;
+                        int pad = 20 - used;
+                        if (pad < 2) pad = 2;
+                        for (int p = 0; p < pad; p++) putchar(' ');
+                        printf("%.*s\n",
+                            (int)arg->description_len, arg->description);
+                    }
+                }
+
+                /* Detailed help text */
+                if (info.help_len > 0) {
+                    printf("\n%.*s\n", (int)info.help_len, info.help);
+                }
+
+                if (arena) c0_arena_free(arena);
+                return 0;
+            }
+        }
+
+        if (arena) c0_arena_free(arena);
+        fprintf(stderr, "Error: Unknown codec '%s'\n", name);
+        return 1;
+    }
+
+    /* No name given — list all codecs */
     printf("Built-in codecs:\n\n");
     if (count == 0) {
         printf("  (none)\n");
     }
     for (size_t i = 0; i < count; i++) {
-        C0CodecInfo info = c0_codec_info(i);
+        C0CodecInfo info = c0_codec_info(NULL, i);
         printf("  %.*s", (int)info.name_len, info.name);
 
         /* Modes */
