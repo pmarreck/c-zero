@@ -1,3 +1,6 @@
+// Enable POSIX functions (strdup, strtok_r) on Linux
+#define _POSIX_C_SOURCE 200809L
+
 /**
  * C0 CLI - Command-line interface for C0 binary format
  *
