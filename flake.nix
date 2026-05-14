@@ -3,24 +3,29 @@
 
 	inputs = {
 		nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+		zig-overlay = {
+			url = "github:mitchellh/zig-overlay";
+			inputs.nixpkgs.follows = "nixpkgs";
+		};
 	};
 
-	outputs = { self, nixpkgs }:
+	outputs = { self, nixpkgs, zig-overlay }:
 		let
 			pname = "c0";
 			version = "0.1.0";
 			allSystems = [ "aarch64-darwin" "x86_64-darwin" "x86_64-linux" "aarch64-linux" ];
 			forAllSystems = nixpkgs.lib.genAttrs allSystems;
+			zigFor = system: zig-overlay.packages.${system}."0.16.0";
 
 			# Fixed-output derivation hash for Zig dependencies
 			# To update: set to "" and run `nix build` — the error will show the correct hash
 			zigDepsHash = "sha256-RQmFFAFLHIKLSLMhu1aQW8TII/pc4lkZll4ldJhFmwQ=";
 
-			mkZigDeps = pkgs: let isDarwin = pkgs.stdenv.isDarwin; in pkgs.stdenv.mkDerivation {
+			mkZigDeps = pkgs: zig: let isDarwin = pkgs.stdenv.isDarwin; in pkgs.stdenv.mkDerivation {
 				pname = "${pname}-zig-deps";
 				inherit version;
 				src = self;
-				nativeBuildInputs = [ pkgs.zig pkgs.git pkgs.cacert ]
+				nativeBuildInputs = [ zig pkgs.git pkgs.cacert ]
 					++ pkgs.lib.optionals isDarwin [
 						pkgs.darwin.cctools
 						pkgs.apple-sdk
@@ -42,13 +47,14 @@
 			packages = forAllSystems (system:
 				let
 					pkgs = import nixpkgs { inherit system; };
+					zig = zigFor system;
 					isDarwin = pkgs.stdenv.isDarwin;
-					zigDeps = mkZigDeps pkgs;
+					zigDeps = mkZigDeps pkgs zig;
 				in {
 					default = pkgs.stdenv.mkDerivation {
 						inherit pname version;
 						src = self;
-						nativeBuildInputs = [ pkgs.zig ]
+						nativeBuildInputs = [ zig ]
 							++ pkgs.lib.optionals isDarwin [
 								pkgs.darwin.cctools
 								pkgs.apple-sdk
@@ -69,14 +75,15 @@
 			checks = forAllSystems (system:
 				let
 					pkgs = import nixpkgs { inherit system; };
+					zig = zigFor system;
 					isDarwin = pkgs.stdenv.isDarwin;
-					zigDeps = mkZigDeps pkgs;
+					zigDeps = mkZigDeps pkgs zig;
 				in {
 					tests = pkgs.stdenv.mkDerivation {
 						pname = "${pname}-tests";
 						inherit version;
 						src = self;
-						nativeBuildInputs = [ pkgs.zig ]
+						nativeBuildInputs = [ zig ]
 							++ pkgs.lib.optionals isDarwin [
 								pkgs.darwin.cctools
 								pkgs.apple-sdk
@@ -99,11 +106,12 @@
 			devShells = forAllSystems (system:
 				let
 					pkgs = import nixpkgs { inherit system; };
+					zig = zigFor system;
 				in {
 					default = pkgs.mkShell {
-						packages = with pkgs; [
+						packages = [
 							zig
-							git
+							pkgs.git
 						];
 						shellHook = ''
 							unset LD
