@@ -50,7 +50,7 @@ fn expandPng(allocator: std.mem.Allocator, data: []const u8, options: CodecOptio
     }
 
     // Parse chunks
-    var chunk_list: std.ArrayListUnmanaged(Value) = .{};
+    var chunk_list: std.ArrayListUnmanaged(Value) = .empty;
     defer chunk_list.deinit(allocator);
 
     var pos: usize = 8;
@@ -151,7 +151,7 @@ fn collapsePng(allocator: std.mem.Allocator, value: Value, options: CodecOptions
     const sig = signature orelse return CodecError.InvalidFormat;
     const chunk_array = chunks orelse return CodecError.InvalidFormat;
 
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     // Write signature
@@ -255,7 +255,7 @@ fn collapsePng(allocator: std.mem.Allocator, value: Value, options: CodecOptions
 
 /// Build a minimal synthetic PNG for testing
 fn buildSyntheticPng(allocator: std.mem.Allocator) ![]u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .{};
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
     errdefer buf.deinit(allocator);
 
     // Signature

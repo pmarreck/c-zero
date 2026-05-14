@@ -12,14 +12,13 @@ const core = @import("c0_core");
 const Value = core.Value;
 const Entry = core.Entry;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
-    // Set up stdout writer (Zig 0.15 API)
+    // Set up stdout writer (Zig 0.16 API)
     var stdout_buf: [8192]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
     const stdout = &stdout_writer.interface;
     defer stdout.flush() catch {};
 

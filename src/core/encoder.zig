@@ -34,7 +34,7 @@ pub fn encode(allocator: std.mem.Allocator, val: Value) ![]u8 {
 /// Encode a Value to C0 binary format with options
 /// Caller owns returned slice and must free with same allocator
 pub fn encodeWithOptions(allocator: std.mem.Allocator, val: Value, options: EncodeOptions) ![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     const mode = EncodeMode{ .smart = .{
@@ -55,7 +55,7 @@ pub fn encodeWithOptions(allocator: std.mem.Allocator, val: Value, options: Enco
 /// Payloads are written as-is (caller is responsible for ensuring no structural bytes)
 /// Caller owns returned slice and must free with same allocator
 pub fn encodeRaw(allocator: std.mem.Allocator, val: Value) ![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     try encodeValue(allocator, &result, val, .raw, false, 0);

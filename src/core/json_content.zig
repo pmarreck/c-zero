@@ -199,7 +199,7 @@ fn parseString(allocator: std.mem.Allocator, json: []const u8, pos: *usize) Pars
     std.debug.assert(json[pos.*] == '"');
     pos.* += 1; // consume opening quote
 
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     while (pos.* < json.len) {
@@ -319,7 +319,7 @@ fn parseArray(allocator: std.mem.Allocator, json: []const u8, pos: *usize) Parse
     std.debug.assert(json[pos.*] == '[');
     pos.* += 1; // consume '['
 
-    var items: std.ArrayListUnmanaged(JsonValue) = .{};
+    var items: std.ArrayListUnmanaged(JsonValue) = .empty;
     errdefer {
         for (items.items) |item| {
             freeJsonValue(allocator, item);
@@ -360,7 +360,7 @@ fn parseObject(allocator: std.mem.Allocator, json: []const u8, pos: *usize) Pars
     std.debug.assert(json[pos.*] == '{');
     pos.* += 1; // consume '{'
 
-    var entries: std.ArrayListUnmanaged(JsonEntry) = .{};
+    var entries: std.ArrayListUnmanaged(JsonEntry) = .empty;
     errdefer {
         for (entries.items) |entry| {
             if (entry.key.len > 0) allocator.free(entry.key);
@@ -445,7 +445,7 @@ pub fn freeJsonValue(allocator: std.mem.Allocator, val: JsonValue) void {
 // ============================================================================
 
 pub fn stringify(allocator: std.mem.Allocator, val: JsonValue) ![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     try stringifyValue(allocator, &result, val, 0);
@@ -668,7 +668,7 @@ pub fn freeC0Value(allocator: std.mem.Allocator, val: Value) void {
 /// no type prefix interpretation. This is a one-way visibility/interop tool,
 /// not a round-trip codec.
 pub fn valueToJson(allocator: std.mem.Allocator, val: Value) ![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     try writeValueAsJson(allocator, &result, val, 0);

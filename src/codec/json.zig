@@ -125,7 +125,7 @@ fn collapseJson(allocator: std.mem.Allocator, value: Value) CodecError![]u8 {
         else => return CodecError.InvalidFormat,
     };
 
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     c0ToJson(allocator, &result, inner, 0) catch return CodecError.OutOfMemory;

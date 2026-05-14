@@ -234,7 +234,7 @@ fn parseXrefStream(allocator: Allocator, data: []const u8, start: usize, table: 
     defer allocator.free(stream_data);
 
     // Parse /Index array
-    var subsections: std.ArrayListUnmanaged([2]u64) = .{};
+    var subsections: std.ArrayListUnmanaged([2]u64) = .empty;
     defer subsections.deinit(allocator);
 
     if (parser.getDictValue(obj.dict, "Index")) |idx_val| {

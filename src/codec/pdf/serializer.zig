@@ -36,7 +36,7 @@ pub fn collapsePdf(allocator: Allocator, value: Value, options: CodecOptions) Co
     }
 
     // Editable mode: rebuild PDF from structure
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     // Get header
@@ -48,7 +48,7 @@ pub fn collapsePdf(allocator: Allocator, value: Value, options: CodecOptions) Co
     const objects = getEntryArray(entries, "objects") orelse return CodecError.InvalidFormat;
 
     // Phase 1 & 2: Serialize objects, record offsets
-    var offsets: std.ArrayListUnmanaged(ObjOffset) = .{};
+    var offsets: std.ArrayListUnmanaged(ObjOffset) = .empty;
     defer offsets.deinit(allocator);
 
     for (objects) |obj_val| {
@@ -561,7 +561,7 @@ fn getFilterChain(allocator: Allocator, dict: Value) []const filters.FilterType 
             return chain;
         },
         .array => |arr| {
-            var chain: std.ArrayListUnmanaged(filters.FilterType) = .{};
+            var chain: std.ArrayListUnmanaged(filters.FilterType) = .empty;
             for (arr) |item| {
                 switch (item) {
                     .string => |name| {
@@ -605,7 +605,7 @@ test "isIndirectRef" {
 
 test "writePdfValue number" {
     const allocator = std.testing.allocator;
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     defer result.deinit(allocator);
 
     try writePdfValue(&result, allocator, .{ .string = "42" });
@@ -614,7 +614,7 @@ test "writePdfValue number" {
 
 test "writePdfValue indirect ref" {
     const allocator = std.testing.allocator;
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     defer result.deinit(allocator);
 
     const ref_entries = try allocator.alloc(Entry, 2);

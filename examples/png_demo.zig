@@ -13,34 +13,35 @@ const core = @import("c0_core");
 const Value = core.Value;
 const Entry = core.Entry;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
-    // Set up stdout writer (Zig 0.15 API)
+    // Set up stdout writer (Zig 0.16 API)
     var stdout_buf: [8192]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
     const stdout = &stdout_writer.interface;
     defer stdout.flush() catch {};
 
     // Get PNG file path from CLI args
-    var args = std.process.args();
-    _ = args.next(); // skip program name
-    const png_path = args.next() orelse {
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (args.len < 2) {
         try stdout.print("Usage: png_demo <path-to-png-file>\n", .{});
         try stdout.print("Example: zig build run-png-demo -- ~/Desktop/image.png\n", .{});
         return;
-    };
+    }
+    const png_path = args[1];
 
     // Read the PNG file
-    const png_data = std.fs.cwd().openFile(png_path, .{}) catch |err| {
+    const png_data = std.Io.Dir.cwd().openFile(io, png_path, .{}) catch |err| {
         try stdout.print("Error opening file '{s}': {}\n", .{ png_path, err });
         return;
     };
-    defer png_data.close();
+    defer png_data.close(io);
 
-    const original = png_data.readToEndAlloc(allocator, 10 * 1024 * 1024) catch |err| {
+    var read_buf: [4096]u8 = undefined;
+    var png_reader = png_data.reader(io, &read_buf);
+    const original = png_reader.interface.allocRemaining(allocator, .limited(10 * 1024 * 1024)) catch |err| {
         try stdout.print("Error reading file: {}\n", .{err});
         return;
     };
@@ -56,7 +57,7 @@ pub fn main() !void {
     try stdout.print("=== C0 PNG Destructuring Demo ===\n\n", .{});
 
     // Parse PNG chunks
-    var chunks: std.ArrayListUnmanaged(PngChunk) = .{};
+    var chunks: std.ArrayListUnmanaged(PngChunk) = .empty;
     defer chunks.deinit(allocator);
 
     var pos: usize = 8; // skip signature
@@ -150,7 +151,7 @@ pub fn main() !void {
     defer core.deinit(allocator, decoded);
 
     // Reassemble PNG from decoded C0 structure
-    var reassembled: std.ArrayListUnmanaged(u8) = .{};
+    var reassembled: std.ArrayListUnmanaged(u8) = .empty;
     defer reassembled.deinit(allocator);
 
     // Write PNG signature (already decoded back to raw binary by core.decode)
@@ -279,7 +280,7 @@ test "PNG chunk parsing round-trip with synthetic PNG" {
 
     // Parse chunks
     const sig = original[0..8];
-    var chunks: std.ArrayListUnmanaged(PngChunk) = .{};
+    var chunks: std.ArrayListUnmanaged(PngChunk) = .empty;
     defer chunks.deinit(allocator);
 
     var pos: usize = 8;
@@ -334,7 +335,7 @@ test "PNG chunk parsing round-trip with synthetic PNG" {
     defer core.deinit(allocator, decoded);
 
     // Reassemble
-    var reassembled: std.ArrayListUnmanaged(u8) = .{};
+    var reassembled: std.ArrayListUnmanaged(u8) = .empty;
     defer reassembled.deinit(allocator);
 
     try reassembled.appendSlice(allocator, decoded.object[0].value.string);

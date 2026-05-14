@@ -87,7 +87,7 @@ fn decodeStringInternal(allocator: std.mem.Allocator, bytes: []const u8, pos: *u
     }
 
     // Build payload without insignificant whitespace
-    var payload: std.ArrayListUnmanaged(u8) = .{};
+    var payload: std.ArrayListUnmanaged(u8) = .empty;
     defer payload.deinit(allocator);
     payload.ensureTotalCapacity(allocator, pos.* - start) catch return DecodeError.OutOfMemory;
     for (bytes[start..pos.*]) |b| {
@@ -113,7 +113,7 @@ fn decodeArrayInternal(allocator: std.mem.Allocator, bytes: []const u8, pos: *us
     std.debug.assert(bytes[pos.*] == enc.ARRAY_OPEN);
     pos.* += 1;
 
-    var items: std.ArrayListUnmanaged(Value) = .{};
+    var items: std.ArrayListUnmanaged(Value) = .empty;
     errdefer {
         for (items.items) |item| {
             deinitValue(allocator, item);
@@ -163,7 +163,7 @@ fn decodeObjectInternal(allocator: std.mem.Allocator, bytes: []const u8, pos: *u
     std.debug.assert(bytes[pos.*] == enc.OBJECT_OPEN);
     pos.* += 1;
 
-    var entries: std.ArrayListUnmanaged(Entry) = .{};
+    var entries: std.ArrayListUnmanaged(Entry) = .empty;
     errdefer {
         for (entries.items) |entry| {
             if (entry.key.len > 0) {

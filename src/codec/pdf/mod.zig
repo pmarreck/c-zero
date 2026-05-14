@@ -77,7 +77,7 @@ pub fn expandPdf(allocator: Allocator, data: []const u8, options: CodecOptions) 
     defer if (xref_table != null) xref_table.?.deinit(allocator);
 
     // Collect objects
-    var objects: std.ArrayListUnmanaged(Value) = .{};
+    var objects: std.ArrayListUnmanaged(Value) = .empty;
     errdefer objects.deinit(allocator);
 
     if (xref_table) |*xt| {
@@ -165,7 +165,7 @@ fn parseObjectToValue(allocator: Allocator, data: []const u8, offset: usize, opt
 
 /// Convert an ObjectResult to a C0 Value.
 fn objectResultToValue(allocator: Allocator, data: []const u8, obj: parser.ObjectResult, options: CodecOptions) !Value {
-    var entries: std.ArrayListUnmanaged(Entry) = .{};
+    var entries: std.ArrayListUnmanaged(Entry) = .empty;
     errdefer entries.deinit(allocator);
 
     // Object number
@@ -241,7 +241,7 @@ fn extractObjectStreamEntries(allocator: Allocator, data: []const u8, offset: us
     const n = parser.getDictInt(obj.dict, "N") orelse return &.{};
     const first = parser.getDictInt(obj.dict, "First") orelse return &.{};
 
-    var results: std.ArrayListUnmanaged(Value) = .{};
+    var results: std.ArrayListUnmanaged(Value) = .empty;
     errdefer results.deinit(allocator);
 
     // Parse the object number + offset pairs
@@ -259,7 +259,7 @@ fn extractObjectStreamEntries(allocator: Allocator, data: []const u8, offset: us
 
         const val_result = parser.parseValue(allocator, decoded, obj_data_start) catch continue;
 
-        var sub_entries: std.ArrayListUnmanaged(Entry) = .{};
+        var sub_entries: std.ArrayListUnmanaged(Entry) = .empty;
         const num_str = std.fmt.allocPrint(allocator, "{d}", .{num_result.value}) catch continue;
         sub_entries.append(allocator, .{ .key = "num", .value = .{ .string = num_str } }) catch continue;
         sub_entries.append(allocator, .{ .key = "gen", .value = .{ .string = "0" } }) catch continue;
@@ -287,7 +287,7 @@ fn getFilterChain(allocator: Allocator, dict: Value) []const filters.FilterType 
             return chain;
         },
         .array => |arr| {
-            var chain: std.ArrayListUnmanaged(filters.FilterType) = .{};
+            var chain: std.ArrayListUnmanaged(filters.FilterType) = .empty;
             for (arr) |item| {
                 switch (item) {
                     .string => |name| {
@@ -338,7 +338,7 @@ fn parseUintSimple(data: []const u8, start: usize) ?struct { value: usize, end: 
 
 /// Build a minimal valid PDF for testing.
 pub fn buildTestPdf(allocator: Allocator) ![]u8 {
-    var pdf: std.ArrayListUnmanaged(u8) = .{};
+    var pdf: std.ArrayListUnmanaged(u8) = .empty;
     errdefer pdf.deinit(allocator);
 
     // Header

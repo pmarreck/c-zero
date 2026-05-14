@@ -131,7 +131,7 @@ fn parseName(data: []const u8, start: usize) ParseError!ParseResult {
 fn parseLiteralString(allocator: Allocator, data: []const u8, start: usize) ParseError!ParseResult {
     if (start >= data.len or data[start] != '(') return ParseError.InvalidSyntax;
 
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var i = start + 1;
@@ -198,7 +198,7 @@ fn parseLiteralString(allocator: Allocator, data: []const u8, start: usize) Pars
 fn parseHexString(allocator: Allocator, data: []const u8, start: usize) ParseError!ParseResult {
     if (start >= data.len or data[start] != '<') return ParseError.InvalidSyntax;
 
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var high_nibble: ?u4 = null;
@@ -284,7 +284,7 @@ fn parseDictWithDepth(allocator: Allocator, data: []const u8, start: usize, dept
     if (start + 1 >= data.len or data[start] != '<' or data[start + 1] != '<')
         return ParseError.InvalidSyntax;
 
-    var entries: std.ArrayListUnmanaged(Entry) = .{};
+    var entries: std.ArrayListUnmanaged(Entry) = .empty;
     errdefer entries.deinit(allocator);
 
     var i = start + 2;
@@ -322,7 +322,7 @@ fn parseDictWithDepth(allocator: Allocator, data: []const u8, start: usize, dept
 fn parseArrayWithDepth(allocator: Allocator, data: []const u8, start: usize, depth: usize) ParseError!ParseResult {
     if (start >= data.len or data[start] != '[') return ParseError.InvalidSyntax;
 
-    var elements: std.ArrayListUnmanaged(Value) = .{};
+    var elements: std.ArrayListUnmanaged(Value) = .empty;
     errdefer elements.deinit(allocator);
 
     var i = start + 1;
@@ -487,7 +487,7 @@ pub fn getDictValue(value: Value, key: []const u8) ?Value {
 
 /// Linear scan for indirect objects in the file (fallback when xref is broken).
 pub fn scanForObjects(allocator: Allocator, data: []const u8) ParseError![]ObjectResult {
-    var objects: std.ArrayListUnmanaged(ObjectResult) = .{};
+    var objects: std.ArrayListUnmanaged(ObjectResult) = .empty;
     errdefer objects.deinit(allocator);
 
     var i: usize = 0;

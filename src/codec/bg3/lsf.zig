@@ -489,7 +489,7 @@ fn buildNode(
     const node_name = resolveString(string_table, node.name_hash_index);
 
     // Collect attributes for this node
-    var attr_entries: std.ArrayListUnmanaged(Entry) = .{};
+    var attr_entries: std.ArrayListUnmanaged(Entry) = .empty;
     defer attr_entries.deinit(allocator);
 
     if (has_sibling_data) {
@@ -510,7 +510,7 @@ fn buildNode(
     }
 
     // Collect children for this node
-    var children: std.ArrayListUnmanaged(Value) = .{};
+    var children: std.ArrayListUnmanaged(Value) = .empty;
     defer children.deinit(allocator);
 
     for (nodes, 0..) |child_node, i| {
@@ -571,11 +571,11 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LsfError![]u8 {
     // Phase 1: Flatten tree into parallel arrays
     var string_interner: StringInterner = .{};
     defer string_interner.deinit(allocator);
-    var flat_nodes: std.ArrayListUnmanaged(FlatNode) = .{};
+    var flat_nodes: std.ArrayListUnmanaged(FlatNode) = .empty;
     defer flat_nodes.deinit(allocator);
-    var flat_attrs: std.ArrayListUnmanaged(FlatAttribute) = .{};
+    var flat_attrs: std.ArrayListUnmanaged(FlatAttribute) = .empty;
     defer flat_attrs.deinit(allocator);
-    var values_buf: std.ArrayListUnmanaged(u8) = .{};
+    var values_buf: std.ArrayListUnmanaged(u8) = .empty;
     defer values_buf.deinit(allocator);
 
     if (root_value) |root| {
@@ -587,7 +587,7 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LsfError![]u8 {
     defer allocator.free(strings_raw);
 
     // Phase 3: Build V2 nodes section (12 bytes each: name_hash + first_attr + parent)
-    var nodes_buf: std.ArrayListUnmanaged(u8) = .{};
+    var nodes_buf: std.ArrayListUnmanaged(u8) = .empty;
     defer nodes_buf.deinit(allocator);
     for (flat_nodes.items) |node| {
         var buf: [12]u8 = undefined;
@@ -598,7 +598,7 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LsfError![]u8 {
     }
 
     // Phase 4: Build V2 attributes section (12 bytes each: name_hash + type_and_length + node_index)
-    var attrs_buf: std.ArrayListUnmanaged(u8) = .{};
+    var attrs_buf: std.ArrayListUnmanaged(u8) = .empty;
     defer attrs_buf.deinit(allocator);
     for (flat_attrs.items) |attr| {
         var buf: [12]u8 = undefined;
@@ -622,7 +622,7 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LsfError![]u8 {
     defer allocator.free(values_comp);
 
     // Phase 6: Assemble V7 header (64 bytes) + section data
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     // Magic + Version
@@ -693,9 +693,9 @@ fn computeHashBucket(name: []const u8) u32 {
 /// Manages string interning with hash table indices
 const StringInterner = struct {
     /// Maps string content to packed hash index (bucket << 16 | chain_pos)
-    lookup: std.StringHashMapUnmanaged(u32) = .{},
+    lookup: std.StringHashMapUnmanaged(u32) = .empty,
     /// Strings organized by bucket for serialization
-    buckets: [HASH_BUCKET_COUNT]std.ArrayListUnmanaged([]const u8) = [_]std.ArrayListUnmanaged([]const u8){.{}} ** HASH_BUCKET_COUNT,
+    buckets: [HASH_BUCKET_COUNT]std.ArrayListUnmanaged([]const u8) = [_]std.ArrayListUnmanaged([]const u8){.empty} ** HASH_BUCKET_COUNT,
 
     fn deinit(self: *StringInterner, allocator: std.mem.Allocator) void {
         self.lookup.deinit(allocator);
@@ -719,7 +719,7 @@ const StringInterner = struct {
 
     /// Serialize to hash table format: num_buckets(u32) + per-bucket: chain_count(u16) + entries(len:u16 + data)
     fn buildHashTable(self: *StringInterner, allocator: std.mem.Allocator) LsfError![]u8 {
-        var buf: std.ArrayListUnmanaged(u8) = .{};
+        var buf: std.ArrayListUnmanaged(u8) = .empty;
         errdefer buf.deinit(allocator);
 
         // Number of buckets

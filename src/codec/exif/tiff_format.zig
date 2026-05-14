@@ -67,7 +67,7 @@ pub fn collapseTiff(allocator: std.mem.Allocator, value: Value, options: CodecOp
 
     // Editable mode: rebuild from parsed structure
     // Strip the "format" and "_raw" fields, pass the rest to collapseTiffData
-    var tiff_entries: std.ArrayListUnmanaged(Entry) = .{};
+    var tiff_entries: std.ArrayListUnmanaged(Entry) = .empty;
     defer tiff_entries.deinit(allocator);
 
     for (entries) |entry| {

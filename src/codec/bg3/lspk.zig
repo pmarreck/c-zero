@@ -106,7 +106,7 @@ pub fn expand(allocator: std.mem.Allocator, data: []const u8) LspkError!Value {
     defer allocator.free(file_list_data);
 
     // Parse file entries
-    var files: std.ArrayListUnmanaged(Value) = .{};
+    var files: std.ArrayListUnmanaged(Value) = .empty;
     defer files.deinit(allocator);
 
     for (0..num_files) |i| {
@@ -175,12 +175,12 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LspkError![]u8 {
     };
 
     // Phase 1: Collapse each file's content to binary
-    var file_datas: std.ArrayListUnmanaged([]u8) = .{};
+    var file_datas: std.ArrayListUnmanaged([]u8) = .empty;
     defer {
         for (file_datas.items) |fd| allocator.free(fd);
         file_datas.deinit(allocator);
     }
-    var file_names: std.ArrayListUnmanaged([]const u8) = .{};
+    var file_names: std.ArrayListUnmanaged([]const u8) = .empty;
     defer file_names.deinit(allocator);
 
     for (files) |file_val| {
@@ -223,7 +223,7 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LspkError![]u8 {
 
     // Phase 2: Zstd compress each file and track offsets
     const num_files = file_datas.items.len;
-    var compressed_datas: std.ArrayListUnmanaged([]u8) = .{};
+    var compressed_datas: std.ArrayListUnmanaged([]u8) = .empty;
     defer {
         for (compressed_datas.items) |cd| allocator.free(cd);
         compressed_datas.deinit(allocator);
@@ -236,14 +236,14 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LspkError![]u8 {
 
     // Phase 3: Build the package
     // Layout: [header 40B][compressed file data...][compressed file list]
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     defer result.deinit(allocator);
 
     // Reserve header space (will fill in later)
     result.appendNTimes(allocator, 0, TOTAL_HEADER) catch return LspkError.OutOfMemory;
 
     // Write compressed file data and record offsets
-    var file_offsets: std.ArrayListUnmanaged(u64) = .{};
+    var file_offsets: std.ArrayListUnmanaged(u64) = .empty;
     defer file_offsets.deinit(allocator);
 
     for (compressed_datas.items) |cd| {
@@ -252,7 +252,7 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LspkError![]u8 {
     }
 
     // Phase 4: Build FileEntry18 list
-    var entry_buf: std.ArrayListUnmanaged(u8) = .{};
+    var entry_buf: std.ArrayListUnmanaged(u8) = .empty;
     defer entry_buf.deinit(allocator);
 
     for (0..num_files) |i| {

@@ -133,7 +133,7 @@ fn encodeFlate(allocator: Allocator, data: []const u8) FilterError![]u8 {
 // ============================================================================
 
 fn decodeAscii85(allocator: Allocator, input: []const u8) FilterError![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var group: [5]u8 = undefined;
@@ -208,7 +208,7 @@ fn ascii85DecodeGroup(group: *const [5]u8, actual_len: usize) ?[4]u8 {
 }
 
 fn encodeAscii85(allocator: Allocator, data: []const u8) FilterError![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var i: usize = 0;
@@ -263,7 +263,7 @@ fn encodeAscii85(allocator: Allocator, data: []const u8) FilterError![]u8 {
 // ============================================================================
 
 fn decodeAsciiHex(allocator: Allocator, input: []const u8) FilterError![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var high_nibble: ?u4 = null;
@@ -291,7 +291,7 @@ fn decodeAsciiHex(allocator: Allocator, input: []const u8) FilterError![]u8 {
 }
 
 fn encodeAsciiHex(allocator: Allocator, data: []const u8) FilterError![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     const hex_chars = "0123456789ABCDEF";
@@ -370,7 +370,7 @@ const BitReader = struct {
 };
 
 fn decodeLzw(allocator: Allocator, input: []const u8) FilterError![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var dict: [MAX_TABLE_SIZE]DictEntry = undefined;
@@ -468,7 +468,7 @@ fn lzwGetFirstByte(dict: []const DictEntry, code: u16) u8 {
 // ============================================================================
 
 fn decodeRunLength(allocator: Allocator, input: []const u8) FilterError![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var i: usize = 0;

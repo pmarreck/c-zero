@@ -40,7 +40,7 @@ pub fn parsePath(allocator: std.mem.Allocator, path: []const u8) (PathError || e
         return empty;
     }
 
-    var segments: std.ArrayListUnmanaged(PathSegment) = .{};
+    var segments: std.ArrayListUnmanaged(PathSegment) = .empty;
     errdefer segments.deinit(allocator);
 
     var pos: usize = 1; // skip leading '.'

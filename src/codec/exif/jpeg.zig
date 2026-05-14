@@ -115,7 +115,7 @@ fn isStandaloneMarker(marker: u8) bool {
 pub fn expandJpeg(allocator: std.mem.Allocator, data: []const u8, options: CodecOptions) CodecError!Value {
     if (data.len < 2 or data[0] != 0xFF or data[1] != 0xD8) return CodecError.InvalidMagic;
 
-    var segments: std.ArrayListUnmanaged(Value) = .{};
+    var segments: std.ArrayListUnmanaged(Value) = .empty;
     defer segments.deinit(allocator);
 
     // SOI
@@ -297,7 +297,7 @@ pub fn collapseJpeg(allocator: std.mem.Allocator, value: Value, options: CodecOp
     }
     const segs = segments orelse return CodecError.InvalidFormat;
 
-    var buf: std.ArrayListUnmanaged(u8) = .{};
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
     errdefer buf.deinit(allocator);
 
     for (segs) |seg_val| {
@@ -417,7 +417,7 @@ pub fn collapseJpeg(allocator: std.mem.Allocator, value: Value, options: CodecOp
 
 /// Build a minimal JPEG with EXIF APP1 segment for testing.
 pub fn buildTestJpeg(allocator: std.mem.Allocator) ![]u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .{};
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
     errdefer buf.deinit(allocator);
 
     // SOI
@@ -562,7 +562,7 @@ test "JPEG with SOS segment" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var buf: std.ArrayListUnmanaged(u8) = .{};
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
 
     // SOI
     try buf.appendSlice(allocator, &.{ 0xFF, 0xD8 });

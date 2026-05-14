@@ -134,7 +134,7 @@ export fn c0_array(arena: ?*C0Arena) ?*C0Value {
     val.* = .{
         .arena = state,
         .type = .array,
-        .data = .{ .array = .{} },
+        .data = .{ .array = .empty },
     };
     return val;
 }
@@ -149,7 +149,7 @@ export fn c0_object(arena: ?*C0Arena) ?*C0Value {
     val.* = .{
         .arena = state,
         .type = .object,
-        .data = .{ .object = .{} },
+        .data = .{ .object = .empty },
     };
     return val;
 }
@@ -737,7 +737,7 @@ fn coreToC0Value(arena: *ArenaState, allocator: std.mem.Allocator, val: core.Val
             .data = .{ .string = s },
         },
         .array => |arr| blk: {
-            var list: std.ArrayListUnmanaged(core.Value) = .{};
+            var list: std.ArrayListUnmanaged(core.Value) = .empty;
             try list.appendSlice(allocator, arr);
             break :blk C0Value{
                 .arena = arena,
@@ -746,7 +746,7 @@ fn coreToC0Value(arena: *ArenaState, allocator: std.mem.Allocator, val: core.Val
             };
         },
         .object => |obj| blk: {
-            var list: std.ArrayListUnmanaged(core.Entry) = .{};
+            var list: std.ArrayListUnmanaged(core.Entry) = .empty;
             try list.appendSlice(allocator, obj);
             break :blk C0Value{
                 .arena = arena,

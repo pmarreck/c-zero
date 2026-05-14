@@ -399,7 +399,7 @@ fn parseIso8601(text: []const u8) !Iso8601Parsed {
 fn interpretUtf16(allocator: std.mem.Allocator, bytes: []const u8, comptime endian: std.builtin.Endian) InterpretError![]u8 {
     if (bytes.len % 2 != 0) return InterpretError.InvalidFormat;
 
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var i: usize = 0;
@@ -430,7 +430,7 @@ fn interpretUtf16(allocator: std.mem.Allocator, bytes: []const u8, comptime endi
 }
 
 fn encodeUtf16(allocator: std.mem.Allocator, text: []const u8, comptime endian: std.builtin.Endian) InterpretError![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var i: usize = 0;
@@ -528,7 +528,7 @@ fn interpretBigint(allocator: std.mem.Allocator, bytes: []const u8, big_endian: 
     }
 
     // Repeatedly divide by 10, collecting remainders
-    var digits: std.ArrayListUnmanaged(u8) = .{};
+    var digits: std.ArrayListUnmanaged(u8) = .empty;
     defer digits.deinit(allocator);
 
     while (len > 0) {
@@ -560,7 +560,7 @@ fn encodeBigint(allocator: std.mem.Allocator, text: []const u8, big_endian: bool
     if (text.len == 0) return InterpretError.InvalidFormat;
 
     // Start with [0], for each digit: multiply by 10 and add
-    var num: std.ArrayListUnmanaged(u8) = .{};
+    var num: std.ArrayListUnmanaged(u8) = .empty;
     defer num.deinit(allocator);
     num.append(allocator, 0) catch return InterpretError.OutOfMemory;
 

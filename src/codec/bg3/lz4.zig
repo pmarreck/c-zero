@@ -60,7 +60,7 @@ pub fn compressBlock(allocator: std.mem.Allocator, src: []const u8) LZ4Error![]u
 /// Format: repeated [compressed_size: u32 LE][compressed_data: compressed_size bytes]
 /// Each chunk decompresses to at most chunk_size bytes (default 64KB)
 pub fn decompressChunked(allocator: std.mem.Allocator, src: []const u8, total_uncompressed: usize, chunk_size: usize) LZ4Error![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var pos: usize = 0;
@@ -88,7 +88,7 @@ pub fn decompressChunked(allocator: std.mem.Allocator, src: []const u8, total_un
 
 /// Compress data in chunked LZ4 format (64KB frames)
 pub fn compressChunked(allocator: std.mem.Allocator, src: []const u8, chunk_size: usize) LZ4Error![]u8 {
-    var result: std.ArrayListUnmanaged(u8) = .{};
+    var result: std.ArrayListUnmanaged(u8) = .empty;
     errdefer result.deinit(allocator);
 
     var pos: usize = 0;

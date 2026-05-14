@@ -88,7 +88,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     lib.installHeader(b.path("ffi/c0.h"), "c0.h");
-    lib.linkLibrary(zlib_lib);
+    lib.root_module.linkLibrary(zlib_lib);
     b.installArtifact(lib);
 
     // C CLI executable
@@ -100,12 +100,12 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
-    cli.addCSourceFile(.{
+    cli.root_module.addCSourceFile(.{
         .file = b.path("cli/main.c"),
         .flags = &.{ "-std=c99", "-Wall", "-Wextra" },
     });
-    cli.addIncludePath(b.path("ffi"));
-    cli.linkLibrary(lib);
+    cli.root_module.addIncludePath(b.path("ffi"));
+    cli.root_module.linkLibrary(lib);
     b.installArtifact(cli);
 
     // Core tests
@@ -132,7 +132,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    ffi_tests.linkLibrary(zlib_lib);
+    ffi_tests.root_module.linkLibrary(zlib_lib);
 
     // Codec tests
     const codec_test_mod = b.createModule(.{
@@ -170,7 +170,7 @@ pub fn build(b: *std.Build) void {
     const codec_tests = b.addTest(.{
         .root_module = codec_test_mod,
     });
-    codec_tests.linkLibrary(zlib_lib);
+    codec_tests.root_module.linkLibrary(zlib_lib);
 
     const run_core_tests = b.addRunArtifact(core_tests);
     const run_ffi_tests = b.addRunArtifact(ffi_tests);

@@ -86,7 +86,7 @@ pub fn expandTiffData(allocator: std.mem.Allocator, data: []const u8) CodecError
     if (ifd0_offset == 0) return CodecError.InvalidFormat;
 
     // Build result entries
-    var result_entries: std.ArrayListUnmanaged(Entry) = .{};
+    var result_entries: std.ArrayListUnmanaged(Entry) = .empty;
     defer result_entries.deinit(allocator);
 
     // byte_order field
@@ -136,7 +136,7 @@ fn expandIfd(
     const entries_end = offset + 2 + @as(usize, entry_count) * 12;
     if (entries_end + 4 > data.len) return CodecError.TruncatedInput;
 
-    var result_entries: std.ArrayListUnmanaged(Entry) = .{};
+    var result_entries: std.ArrayListUnmanaged(Entry) = .empty;
     defer result_entries.deinit(allocator);
 
     var i: usize = 0;
@@ -278,7 +278,7 @@ fn convertToC0Value(
                 return Value{ .string = try formatInt(allocator, val) };
             }
             // Array of signed bytes
-            var items: std.ArrayListUnmanaged(Value) = .{};
+            var items: std.ArrayListUnmanaged(Value) = .empty;
             defer items.deinit(allocator);
             var idx: usize = 0;
             while (idx < count) : (idx += 1) {
@@ -292,7 +292,7 @@ fn convertToC0Value(
                 const val = std.mem.readInt(i16, data[0..2], endian(order));
                 return Value{ .string = try formatInt(allocator, val) };
             }
-            var items: std.ArrayListUnmanaged(Value) = .{};
+            var items: std.ArrayListUnmanaged(Value) = .empty;
             defer items.deinit(allocator);
             var idx: usize = 0;
             while (idx < count) : (idx += 1) {
@@ -306,7 +306,7 @@ fn convertToC0Value(
                 const val = std.mem.readInt(i32, data[0..4], endian(order));
                 return Value{ .string = try formatInt(allocator, val) };
             }
-            var items: std.ArrayListUnmanaged(Value) = .{};
+            var items: std.ArrayListUnmanaged(Value) = .empty;
             defer items.deinit(allocator);
             var idx: usize = 0;
             while (idx < count) : (idx += 1) {
@@ -339,7 +339,7 @@ fn formatInt(allocator: std.mem.Allocator, val: anytype) CodecError![]const u8 {
 }
 
 fn formatUintArray(allocator: std.mem.Allocator, comptime T: type, data: []const u8, count: u32) CodecError!Value {
-    var items: std.ArrayListUnmanaged(Value) = .{};
+    var items: std.ArrayListUnmanaged(Value) = .empty;
     defer items.deinit(allocator);
     var idx: usize = 0;
     while (idx < count) : (idx += 1) {
@@ -352,7 +352,7 @@ fn formatUintArray(allocator: std.mem.Allocator, comptime T: type, data: []const
 }
 
 fn formatShortArray(allocator: std.mem.Allocator, data: []const u8, count: u32, order: ByteOrder) CodecError!Value {
-    var items: std.ArrayListUnmanaged(Value) = .{};
+    var items: std.ArrayListUnmanaged(Value) = .empty;
     defer items.deinit(allocator);
     var idx: usize = 0;
     while (idx < count) : (idx += 1) {
@@ -365,7 +365,7 @@ fn formatShortArray(allocator: std.mem.Allocator, data: []const u8, count: u32, 
 }
 
 fn formatLongArray(allocator: std.mem.Allocator, data: []const u8, count: u32, order: ByteOrder) CodecError!Value {
-    var items: std.ArrayListUnmanaged(Value) = .{};
+    var items: std.ArrayListUnmanaged(Value) = .empty;
     defer items.deinit(allocator);
     var idx: usize = 0;
     while (idx < count) : (idx += 1) {
@@ -394,7 +394,7 @@ fn makeRational(allocator: std.mem.Allocator, data: []const u8, order: ByteOrder
 }
 
 fn formatRationalArray(allocator: std.mem.Allocator, data: []const u8, count: u32, order: ByteOrder, signed: bool) CodecError!Value {
-    var items: std.ArrayListUnmanaged(Value) = .{};
+    var items: std.ArrayListUnmanaged(Value) = .empty;
     defer items.deinit(allocator);
     var idx: usize = 0;
     while (idx < count) : (idx += 1) {
@@ -438,7 +438,7 @@ pub fn collapseTiffData(allocator: std.mem.Allocator, value: Value) CodecError![
 
     const ifd0 = ifd0_val orelse return CodecError.InvalidFormat;
 
-    var buf: std.ArrayListUnmanaged(u8) = .{};
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
     errdefer buf.deinit(allocator);
 
     // Write TIFF header
@@ -485,11 +485,11 @@ fn collapseIfd(
     };
 
     // Separate regular entries from sub-IFD entries
-    var regular: std.ArrayListUnmanaged(PreparedEntry) = .{};
+    var regular: std.ArrayListUnmanaged(PreparedEntry) = .empty;
     defer regular.deinit(allocator);
 
     const SubIfdInfo = struct { tag: u16, value: Value, context: IfdContext };
-    var sub_ifds: std.ArrayListUnmanaged(SubIfdInfo) = .{};
+    var sub_ifds: std.ArrayListUnmanaged(SubIfdInfo) = .empty;
     defer sub_ifds.deinit(allocator);
 
     for (ifd_entries) |entry| {
@@ -567,7 +567,7 @@ fn collapseIfd(
     }
 
     // Write sub-IFD pointer entries with placeholder offsets
-    var sub_ifd_patch_positions: std.ArrayListUnmanaged(usize) = .{};
+    var sub_ifd_patch_positions: std.ArrayListUnmanaged(usize) = .empty;
     defer sub_ifd_patch_positions.deinit(allocator);
 
     for (sub_ifds.items) |sub| {
@@ -808,7 +808,7 @@ fn inferType(value: Value) TiffType {
 /// Build a minimal TIFF binary for testing:
 /// Little-endian, IFD0 with Make="Canon" and Orientation=1
 pub fn buildTestTiff(allocator: std.mem.Allocator) ![]u8 {
-    var buf: std.ArrayListUnmanaged(u8) = .{};
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
     errdefer buf.deinit(allocator);
 
     // Header: "II" + 42 + offset to IFD0 (8)
@@ -898,7 +898,7 @@ test "expand TIFF with RATIONAL value" {
     const allocator = std.testing.allocator;
 
     // Build a TIFF with XResolution = 72/1
-    var buf: std.ArrayListUnmanaged(u8) = .{};
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
     defer buf.deinit(allocator);
 
     // Header
