@@ -4,8 +4,8 @@
 	.version = "0.1.0",
 	.dependencies = .{
 		.printable_binary = .{
-			.url = "git+https://github.com/pmarreck/printable-binary#5e0a24589f74c7e759576faeae8a5879528ad563",
-			.hash = "printable_binary-1.0.0-SdPiytUFFgCCfZiOs21MHouz05XzwDoufyGYAW862kAs",
+			.url = "git+https://github.com/pmarreck/printable-binary#3baa3ef9ac2bde838af65e384ab49605d3f95d92",
+			.hash = "printable_binary-1.0.0-SdPiyhM8FwC-Cu8V1e8Joio4mTcFZ2N6eTmnHg7knIsr",
 		},
 		.zlib = .{
 			.url = "https://github.com/allyourcodebase/zlib/archive/refs/heads/main.tar.gz",
