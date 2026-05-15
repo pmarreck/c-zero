@@ -19,7 +19,7 @@
 
 			# Fixed-output derivation hash for Zig dependencies
 			# To update: set to "" and run `nix build` — the error will show the correct hash
-			zigDepsHash = "sha256-RQmFFAFLHIKLSLMhu1aQW8TII/pc4lkZll4ldJhFmwQ=";
+			zigDepsHash = "sha256-esF+XFqSa2jTWuwS4tzGSlYBdAhAOnFquwOJtJAarls=";
 
 			mkZigDeps = pkgs: zig: let isDarwin = pkgs.stdenv.isDarwin; in pkgs.stdenv.mkDerivation {
 				pname = "${pname}-zig-deps";
