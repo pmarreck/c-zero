@@ -97,19 +97,17 @@
 							chmod -R u+w $ZIG_GLOBAL_CACHE_DIR
 							# On Linux, Zig with link_libc bakes the FHS dynamic-linker
 							# path into binaries, which does not exist in the Nix
-							# sandbox. Compile test binaries first, patchelf them, then
-							# run the test step which reuses the cached artifacts.
+							# sandbox. Pass -Ddynamic-linker so Zig produces ELFs with
+							# Nix's loader path baked in from the start.
 							${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
-							zig build test-compile
 							DL="$(cat ${pkgs.stdenv.cc}/nix-support/dynamic-linker)"
-							for d in .zig-cache zig-out; do
-								[ -d "$d" ] || continue
-								for f in $(find "$d" -type f -perm -u+x); do
-									patchelf --set-interpreter "$DL" "$f" 2>/dev/null || true
-								done
-							done
+							export ZIG_BUILD_DYN_LINKER="$DL"
 							''}
-							timeout 600 zig build test || { echo "Tests failed"; exit 1; }
+							ZIG_DL_ARG=""
+							if [ -n "''${ZIG_BUILD_DYN_LINKER:-}" ]; then
+								ZIG_DL_ARG="-Ddynamic-linker=$ZIG_BUILD_DYN_LINKER"
+							fi
+							timeout 600 zig build test $ZIG_DL_ARG || { echo "Tests failed"; exit 1; }
 						'';
 						installPhase = ''
 							mkdir -p $out
