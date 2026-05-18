@@ -181,6 +181,23 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ffi_tests.step);
     test_step.dependOn(&run_codec_tests.step);
 
+    // Lets CI build test binaries without running them (so patchelf can fix
+    // up the FHS dynamic-linker path that Zig bakes into libc-linked exes
+    // which doesn't exist in the Nix build sandbox).
+    const test_compile_step = b.step("test-compile", "Compile test binaries without running them");
+    test_compile_step.dependOn(&b.addInstallArtifact(core_tests, .{
+        .dest_dir = .{ .override = .{ .custom = "test-bins" } },
+        .dest_sub_path = "core_tests",
+    }).step);
+    test_compile_step.dependOn(&b.addInstallArtifact(ffi_tests, .{
+        .dest_dir = .{ .override = .{ .custom = "test-bins" } },
+        .dest_sub_path = "ffi_tests",
+    }).step);
+    test_compile_step.dependOn(&b.addInstallArtifact(codec_tests, .{
+        .dest_dir = .{ .override = .{ .custom = "test-bins" } },
+        .dest_sub_path = "codec_tests",
+    }).step);
+
     _ = ffi_mod;
 
     // JSON demo executable
