@@ -5,34 +5,47 @@ on:
     branches: [yolo]
   pull_request:
     branches: [yolo]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-test:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15
-            name: macOS ARM
-          - os: ubuntu-latest
-            name: Linux Intel
-          - os: ubuntu-24.04-arm
-            name: Linux ARM
-          - os: windows-latest
-            name: Windows Intel
+          - runner: ubuntu-latest
+            system: x86_64-linux
+            name: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+            name: linux-aarch64
+          - runner: macos-latest
+            system: aarch64-darwin
+            name: macos-aarch64
 
+    runs-on: ${{ matrix.runner }}
     name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+        timeout-minutes: 5
+        continue-on-error: true
 
       - name: Build
-        run: zig build
+        run: nix build .#packages.${{ matrix.system }}.default -L
 
       - name: Test
-        run: zig build test
+        # c0/flake.nix exposes the test check as `checks.<system>.tests`
+        # (plural). Mirrors `zig build test` but on Linux re-spawns the
+        # compiled test binaries through Nix's dynamic linker since Zig
+        # 0.16 bakes an FHS loader path that doesn't exist in the sandbox.
+        run: nix build .#checks.${{ matrix.system }}.tests -L
