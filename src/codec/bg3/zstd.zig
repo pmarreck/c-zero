@@ -29,10 +29,19 @@ pub fn decompress(allocator: std.mem.Allocator, src: []const u8, max_size: usize
 
     if (c.ZSTD_isError(result) != 0) return ZstdError.DecompressionFailed;
 
-    // Shrink to actual decompressed size if smaller than max_size
+    // Shrink to actual decompressed size if smaller than max_size. If the
+    // shrink realloc fails, fall back to a fresh exact-size allocation + copy:
+    // returning dest[0..result] would hand the caller a slice whose length
+    // under-reports the real allocation, corrupting the allocator on free.
     if (result < max_size) {
-        const shrunk = allocator.realloc(dest, result) catch return dest[0..result];
-        return shrunk;
+        if (allocator.realloc(dest, result)) |shrunk| {
+            return shrunk;
+        } else |_| {
+            const exact = allocator.alloc(u8, result) catch return ZstdError.OutOfMemory;
+            @memcpy(exact, dest[0..result]);
+            allocator.free(dest);
+            return exact;
+        }
     }
     return dest;
 }
@@ -55,9 +64,17 @@ pub fn compress(allocator: std.mem.Allocator, src: []const u8, level: c_int) Zst
 
     if (c.ZSTD_isError(result) != 0) return ZstdError.CompressionFailed;
 
-    // Shrink to actual size
-    const shrunk = allocator.realloc(dest, result) catch return dest[0..result];
-    return shrunk;
+    // Shrink to actual size. If the shrink realloc fails, fall back to a fresh
+    // exact-size allocation + copy (see decompress) so the returned slice can be
+    // freed correctly by the caller.
+    if (allocator.realloc(dest, result)) |shrunk| {
+        return shrunk;
+    } else |_| {
+        const exact = allocator.alloc(u8, result) catch return ZstdError.OutOfMemory;
+        @memcpy(exact, dest[0..result]);
+        allocator.free(dest);
+        return exact;
+    }
 }
 
 // These constants can't come from cImport due to Zig integer overflow issues

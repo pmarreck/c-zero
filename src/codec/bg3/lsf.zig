@@ -627,37 +627,37 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LsfError![]u8 {
 
     // Magic + Version
     result.appendSlice(allocator, LSF_MAGIC) catch return LsfError.OutOfMemory;
-    appendU32(&result, allocator, version);
+    try appendU32(&result, allocator, version);
 
     // Engine version (8 bytes for V5+)
-    appendU32(&result, allocator, 0); // engine version low
-    appendU32(&result, allocator, 0); // engine version high
+    try appendU32(&result, allocator, 0); // engine version low
+    try appendU32(&result, allocator, 0); // engine version high
 
     // Section sizes: strings
-    appendU32(&result, allocator, @intCast(strings_raw.len));
-    appendU32(&result, allocator, @intCast(strings_comp.len));
+    try appendU32(&result, allocator, @intCast(strings_raw.len));
+    try appendU32(&result, allocator, @intCast(strings_comp.len));
 
     // Section sizes: keys (V6+, always 0/0 for metadata_format=none)
-    appendU32(&result, allocator, 0);
-    appendU32(&result, allocator, 0);
+    try appendU32(&result, allocator, 0);
+    try appendU32(&result, allocator, 0);
 
     // Section sizes: nodes
-    appendU32(&result, allocator, @intCast(nodes_buf.items.len));
-    appendU32(&result, allocator, @intCast(nodes_comp.len));
+    try appendU32(&result, allocator, @intCast(nodes_buf.items.len));
+    try appendU32(&result, allocator, @intCast(nodes_comp.len));
 
     // Section sizes: attributes
-    appendU32(&result, allocator, @intCast(attrs_buf.items.len));
-    appendU32(&result, allocator, @intCast(attrs_comp.len));
+    try appendU32(&result, allocator, @intCast(attrs_buf.items.len));
+    try appendU32(&result, allocator, @intCast(attrs_comp.len));
 
     // Section sizes: values
-    appendU32(&result, allocator, @intCast(values_buf.items.len));
-    appendU32(&result, allocator, @intCast(values_comp.len));
+    try appendU32(&result, allocator, @intCast(values_buf.items.len));
+    try appendU32(&result, allocator, @intCast(values_comp.len));
 
     // CompressionFlags(1) + Unknown2(1) + Unknown3(2) + MetadataFormat(4)
     result.append(allocator, compression_flags) catch return LsfError.OutOfMemory;
     result.append(allocator, 0) catch return LsfError.OutOfMemory; // unknown2
     result.appendSlice(allocator, &[_]u8{ 0, 0 }) catch return LsfError.OutOfMemory; // unknown3
-    appendU32(&result, allocator, 0); // metadata_format = none
+    try appendU32(&result, allocator, 0); // metadata_format = none
 
     // Section data (order: strings, nodes, attributes, values)
     result.appendSlice(allocator, strings_comp) catch return LsfError.OutOfMemory;
@@ -668,10 +668,10 @@ pub fn collapse(allocator: std.mem.Allocator, value: Value) LsfError![]u8 {
     return result.toOwnedSlice(allocator) catch return LsfError.OutOfMemory;
 }
 
-fn appendU32(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, val: u32) void {
+fn appendU32(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, val: u32) LsfError!void {
     var buf: [4]u8 = undefined;
     std.mem.writeInt(u32, &buf, val, .little);
-    list.appendSlice(allocator, &buf) catch {};
+    list.appendSlice(allocator, &buf) catch return LsfError.OutOfMemory;
 }
 
 // ============================================================================
@@ -923,4 +923,41 @@ test "LSF header parsing rejects unsupported versions" {
 test "LSF attribute type names" {
     try std.testing.expectEqualStrings("int", (types.AttributeType.Int).name());
     try std.testing.expectEqualStrings("float", (types.AttributeType.Float).name());
+}
+
+test "LSF collapse propagates OOM instead of silently truncating output" {
+    const root = Value{ .object = &.{
+        .{ .key = "_name", .value = .{ .string = "root" } },
+        .{ .key = "_attributes", .value = .{ .object = &.{
+            .{ .key = "MyAttribute", .value = .{ .string = "hello world" } },
+        } } },
+    } };
+    const top = Value{ .object = &.{
+        .{ .key = "version", .value = .{ .string = "7" } },
+        .{ .key = "root", .value = root },
+    } };
+
+    // Reference: the correct, complete output.
+    const reference = try collapse(std.testing.allocator, top);
+    defer std.testing.allocator.free(reference);
+
+    // Count total allocations on the happy path.
+    var counter = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = std.math.maxInt(usize) });
+    const counted = try collapse(counter.allocator(), top);
+    counter.allocator().free(counted);
+    const total_allocs = counter.allocations;
+
+    // Sweep: failing the Nth allocation must yield either error.OutOfMemory
+    // or a byte-identical buffer — never a silently-truncated "success".
+    var n: usize = 0;
+    while (n <= total_allocs) : (n += 1) {
+        var fa = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = n });
+        const a = fa.allocator();
+        if (collapse(a, top)) |out| {
+            defer a.free(out);
+            try std.testing.expectEqualSlices(u8, reference, out);
+        } else |err| {
+            try std.testing.expectEqual(LsfError.OutOfMemory, err);
+        }
+    }
 }

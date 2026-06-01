@@ -6,6 +6,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const zlib = @import("zlib.zig");
+const util = @import("util.zig");
 
 pub const FilterError = error{
     InvalidData,
@@ -304,14 +305,7 @@ fn encodeAsciiHex(allocator: Allocator, data: []const u8) FilterError![]u8 {
     return result.toOwnedSlice(allocator) catch return FilterError.OutOfMemory;
 }
 
-fn hexToNibble(ch: u8) ?u4 {
-    return switch (ch) {
-        '0'...'9' => @intCast(ch - '0'),
-        'A'...'F' => @intCast(ch - 'A' + 10),
-        'a'...'f' => @intCast(ch - 'a' + 10),
-        else => null,
-    };
-}
+const hexToNibble = util.hexToNibble;
 
 // ============================================================================
 // LZWDecode
@@ -498,12 +492,7 @@ fn decodeRunLength(allocator: Allocator, input: []const u8) FilterError![]u8 {
 // Helpers
 // ============================================================================
 
-fn isWhitespace(ch: u8) bool {
-    return switch (ch) {
-        ' ', '\t', '\n', '\r', '\x0c', '\x00' => true,
-        else => false,
-    };
-}
+const isWhitespace = util.isWhitespace;
 
 // ============================================================================
 // Tests

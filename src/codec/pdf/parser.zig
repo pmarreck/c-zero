@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const core = @import("c0_core");
 const Value = core.Value;
 const Entry = core.Entry;
+const util = @import("util.zig");
 
 pub const ParseError = error{
     InvalidSyntax,
@@ -552,21 +553,9 @@ fn findKeyword(data: []const u8, start: usize, keyword: []const u8) ?usize {
     return null;
 }
 
-fn hexToNibble(ch: u8) ?u4 {
-    return switch (ch) {
-        '0'...'9' => @intCast(ch - '0'),
-        'A'...'F' => @intCast(ch - 'A' + 10),
-        'a'...'f' => @intCast(ch - 'a' + 10),
-        else => null,
-    };
-}
+const hexToNibble = util.hexToNibble;
 
-fn isWhitespaceChar(ch: u8) bool {
-    return switch (ch) {
-        ' ', '\t', '\n', '\r', '\x0c', '\x00' => true,
-        else => false,
-    };
-}
+const isWhitespaceChar = util.isWhitespace;
 
 fn isDelimiterChar(ch: u8) bool {
     return switch (ch) {

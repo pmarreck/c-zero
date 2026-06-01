@@ -10,6 +10,7 @@ const Value = core.Value;
 const Entry = core.Entry;
 const parser = @import("parser.zig");
 const filters = @import("filters.zig");
+const util = @import("util.zig");
 
 pub const XrefError = error{
     NotFound,
@@ -343,12 +344,7 @@ fn parseUint(data: []const u8, start: usize) ?struct { value: u64, end: usize } 
     return .{ .value = value, .end = i };
 }
 
-fn isWhitespace(ch: u8) bool {
-    return switch (ch) {
-        ' ', '\t', '\n', '\r', '\x0c', '\x00' => true,
-        else => false,
-    };
-}
+const isWhitespace = util.isWhitespace;
 
 fn skipWsNoComment(data: []const u8, start: usize) usize {
     var i = start;
