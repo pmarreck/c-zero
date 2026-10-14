@@ -1,20 +1,22 @@
-# C0 Implementation Plan
+# PLAN
 
-## Completed
-- [x] Task 1: Project scaffolding (2026-02-02)
-- [x] Task 2: Value type definition (2026-02-02)
-- [x] Task 3: Wire printable_binary dependency (2026-02-02)
-- [x] Task 4: Encoder implementation (2026-02-02)
-- [x] Task 5: Decoder implementation (2026-02-02)
-- [x] Task 6: Round-trip tests (2026-02-02)
-- [x] Task 7: FFI layer (arena-based) (2026-02-02)
-- [x] Task 8: C CLI (2026-02-02)
-- [x] Task 9: CLI bash tests (2026-02-02)
-- [x] Task 10: Documentation (2026-02-02)
+Completed items retire to `docs/PLAN_LOG.md`. Spec: `SPECIFICATION.md`.
 
-## Future Work
-- [ ] JSON demo (examples/json_demo.zig) - Show conversion between JSON and C0
-- [ ] Streaming API - Parse/encode incrementally for large data
-- [ ] Performance benchmarks - Compare with JSON, MessagePack, etc.
-- [ ] Language bindings - Python, Rust, Go wrappers
-- [ ] Format revision - Address empty string/key ambiguity documented in roundtrip_test.zig
+## Now
+- [x] Ignore Zig 0.16 local package cache `zig-pkg/` and commit relative reference-doc symlinks (done 2026-10-14 15:05 EDT)
+- [ ] Benchmark baseline: `./bm` measuring core encode/decode throughput against `std.json` on matched fixtures (performance-profiling skill)
+
+## Next
+- [ ] Migrate `PROJECT_OVERVIEW.md` into `INTENT.md` (gather-project-intentions skill)
+- [ ] Streaming API: incremental parse/encode for large inputs; design the event/pull shape first
+- [ ] Extend benchmarks to MessagePack once a pinned Zig or C implementation is chosen
+
+## Deferred
+- [ ] Language bindings beyond the C FFI (e.g. Rust, LuaJIT); wait for a concrete consumer, no Python/Go
+
+## Recently completed
+- [x] JSON subset <-> C0 demo `examples/json_demo.zig` (done 2026-02-02, b731915)
+- [x] Empty-string ambiguity accepted as a documented limitation, SPECIFICATION.md §8 (done 2026-02-10, 27d19cc)
+- [x] C CLI (done 2026-02-02)
+- [x] CLI bash tests (done 2026-02-02)
+- [x] Documentation (done 2026-02-02)
