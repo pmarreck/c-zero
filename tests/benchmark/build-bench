@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Builds the c0-bench adapter in one optimize mode into zig-out/bench/MODE/bin/c0-bench and prints
+# that path. Usage: build-bench MODE (ReleaseFast for measurements, Debug for the refusal test).
+set -u
+root=$(cd -- "$(dirname -- "$0")/../.." && pwd)
+mode=${1:?usage: build-bench MODE}
+prefix="$root/zig-out/bench/$mode"
+cache="${ZIG_GLOBAL_CACHE_DIR:-$HOME/.cache/zig}"
+mkdir -p "$cache"
+(cd "$root" && zig build bench "-Doptimize=$mode" --prefix "$prefix" --global-cache-dir "$cache") >&2 || exit 1
+printf '%s\n' "$prefix/bin/c0-bench"

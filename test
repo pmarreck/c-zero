@@ -74,6 +74,20 @@ if [[ -d tests/cli ]]; then
 	fi
 fi
 
+echo "=== Running benchmark adapter and performance gates ==="
+export ZIG_GLOBAL_CACHE_DIR="$ZIG_CACHE"
+set +e
+for gate in tests/benchmark/test ./cg ./mg; do
+	# Gate verdicts go to stderr; the full JSON records are kept in the external history.
+	"$gate" >/dev/null
+	rc=$?
+	if [[ $rc -ne 0 ]]; then
+		echo "=== $gate FAILED (exit $rc) ==="
+		total_failures=$((total_failures + 1))
+	fi
+done
+set -e
+
 if [[ $total_failures -ne 0 ]]; then
 	echo "=== TOTAL FAILURES: $total_failures ==="
 	exit $total_failures

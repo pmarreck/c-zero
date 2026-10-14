@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# performance-profile adapter command (profiling.json): run CASE SIZES SEED. Executes the ReleaseFast
+# c0-bench, which prints performance-measurement/v1 JSON. tests/benchmark/engine builds it first.
+set -u
+root=$(cd -- "$(dirname -- "$0")/../.." && pwd)
+bench="$root/zig-out/bench/ReleaseFast/bin/c0-bench"
+[[ -x $bench ]] || { printf 'run: %s missing; run tests/benchmark/build-bench ReleaseFast\n' "$bench" >&2; exit 1; }
+exec "$bench" "$@"

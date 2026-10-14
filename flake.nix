@@ -7,9 +7,11 @@
 			url = "github:mitchellh/zig-overlay";
 			inputs.nixpkgs.follows = "nixpkgs";
 		};
+		# performance-profile: the shared timing, complexity and memory gate engine (./cg, ./mg, ./bm).
+		performance-profiling.url = "github:pmarreck/performance_profiling/a04d62a441a5b9315e81f6277f57f7eddb9a57af";
 	};
 
-	outputs = { self, nixpkgs, zig-overlay }:
+	outputs = { self, nixpkgs, zig-overlay, performance-profiling }:
 		let
 			pname = "c0";
 			version = "0.1.0";
@@ -130,6 +132,8 @@
 						packages = [
 							zig
 							pkgs.git
+							pkgs.jq
+							performance-profiling.packages.${system}.default
 						];
 						shellHook = ''
 							unset LD

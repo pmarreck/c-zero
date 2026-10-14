@@ -1,0 +1,13 @@
+{
+	"schema": "performance-project/v1",
+	"project": "c0",
+	"history_url": "file:///var/lib/performance-profiling",
+	"identity": {"runtime": "zig-0.16", "build_mode": "ReleaseFast", "concurrency": 1},
+	"cases": [
+		{"cores": 1, "name": "roundtrip_cpu_growth_1c", "definition": "roundtrip-generated-object-cpu-v1", "mode": "cg", "metric": "cpu_ns", "command": ["tests/benchmark/run", "{case}", "{sizes}", "{seed}"], "sizes": [2048, 4096, 8192, 16384], "bounds": [1.8, 2.25]},
+		{"cores": 12, "name": "roundtrip_cpu_growth_12c", "definition": "roundtrip-generated-object-cpu-v1", "mode": "cg", "metric": "cpu_ns", "command": ["tests/benchmark/run", "{case}", "{sizes}", "{seed}"], "sizes": [2048, 4096, 8192, 16384], "bounds": [1.8, 2.25]},
+		{"cores": 1, "name": "roundtrip_peak_heap", "definition": "roundtrip-generated-object-heap-v1", "mode": "mg", "metric": "peak_bytes", "command": ["tests/benchmark/run", "{case}", "{sizes}", "{seed}"], "sizes": [2048, 4096, 8192, 16384], "bounds": [1.5, 2.6], "residual_allowance": 0},
+		{"cores": 1, "name": "roundtrip_fixed_cpu_1c", "definition": "roundtrip-generated-object-16384-cpu-v1", "mode": "bm", "metric": "cpu_ns", "comparison": "absolute", "command": ["tests/benchmark/run", "{case}", "{sizes}", "{seed}"], "sizes": [16384], "bounds": [1, 10000000000]},
+		{"cores": 12, "name": "roundtrip_fixed_cpu_12c", "definition": "roundtrip-generated-object-16384-cpu-v1", "mode": "bm", "metric": "cpu_ns", "comparison": "absolute", "command": ["tests/benchmark/run", "{case}", "{sizes}", "{seed}"], "sizes": [16384], "bounds": [1, 10000000000]}
+	]
+}

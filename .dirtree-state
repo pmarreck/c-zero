@@ -1,0 +1,16 @@
+# Dirtree: Stateful directory trees in the CLI for humans and LLMs. https://github.com/pmarreck/dirtree
+ver=1.2
+annotate=[
+	bm = Fixed-workload round-trip CPU benchmarks via performance-profile
+	cg = Input-growth CPU gates via performance-profile
+	docs/BENCHMARKS.md = Performance gate commands, workload, domain limitation and shape-bound rationale
+	docs/PLAN_LOG.md = Retired PLAN.md items
+	docs/plan_context/smart_encoding_defect.md = Smart-encoding round-trip defect: evidence, pending owner decision, constraints
+	mg = Peak-heap growth and residual gates via performance-profile
+	profiling.json = performance-profile cases: round-trip CPU growth (1c/12c), peak heap, fixed 16384-entry CPU
+	tests/benchmark/build-bench = Builds c0-bench in a given optimize mode under zig-out/bench/MODE
+	tests/benchmark/c0_bench.zig = c0-bench adapter: seeded fixture generator, counting allocator, timed encode/decode round trip emitting performance-measurement/v1 JSON
+	tests/benchmark/engine = Builds ReleaseFast c0-bench and runs performance-profile with profiling.json
+	tests/benchmark/run = performance-profile adapter command: execs the ReleaseFast c0-bench
+	tests/benchmark/test = Contract test for c0-bench: clean JSON, Debug refusal, malformed-argument rejection
+]

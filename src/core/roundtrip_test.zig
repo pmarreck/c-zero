@@ -384,3 +384,53 @@ test "round-trip: many object entries" {
     const val = Value{ .object = &entries };
     try roundTrip(allocator, val);
 }
+
+// KNOWN DEFECT LEDGER, not a passing contract. SPECIFICATION.md §12 promises deterministic round
+// trips of binary payloads, but §13 smart encoding passes through raw text that already looks
+// printable-binary encoded, and the decoder then decodes it to different bytes. Owner decision
+// c0-smart-encoding-roundtrip is pending. This sweep classifies every two-byte UTF-8 sequence and
+// pins the observed defect set: if a fix or a regression changes it, this test fails and the
+// ledger must be updated deliberately alongside the decision.
+const known_two_byte_defects = 162;
+const two_byte_sequences = (0xE0 - 0xC2) * (0xC0 - 0x80);
+
+test "known defect ledger: smart encoding corrupts glyph-only two-byte text (§12 violated)" {
+    const allocator = std.testing.allocator;
+    const encoding = @import("encoding.zig");
+    var defects: usize = 0;
+    var swept: usize = 0;
+    var buf: [2]u8 = undefined;
+    for (0xC2..0xE0) |lead| for (0x80..0xC0) |cont| {
+        buf = .{ @intCast(lead), @intCast(cont) };
+        swept += 1;
+        const original = Value{ .string = &buf };
+        const encoded = try encoder.encode(allocator, original);
+        defer allocator.free(encoded);
+        const decoded = try decoder.decode(allocator, encoded);
+        defer decoder.deinitValue(allocator, decoded);
+        if (original.eql(decoded)) continue;
+        defects += 1;
+        // Every defect has the documented cause: the raw text was passed through unencoded
+        // because it is valid UTF-8 made only of printable-binary glyphs.
+        try std.testing.expectEqualStrings(&buf, encoded);
+        try std.testing.expect(encoding.isAlreadyEncoded(&buf));
+    };
+    try std.testing.expectEqual(@as(usize, two_byte_sequences), swept);
+    try std.testing.expectEqual(@as(usize, known_two_byte_defects), defects);
+}
+
+test "known defect ledger: narration examples (lone section, copyright and pilcrow signs)" {
+    const allocator = std.testing.allocator;
+    const cases = [_]struct { raw: []const u8, decodes_to: u8 }{
+        .{ .raw = "\u{00A7}", .decodes_to = 0x0C }, // section sign -> form feed
+        .{ .raw = "\u{00A9}", .decodes_to = 0x18 }, // copyright sign -> CAN
+        .{ .raw = "\u{00B6}", .decodes_to = 0x0A }, // pilcrow -> line feed
+    };
+    for (cases) |c| {
+        const encoded = try encoder.encode(allocator, .{ .string = c.raw });
+        defer allocator.free(encoded);
+        const decoded = try decoder.decode(allocator, encoded);
+        defer decoder.deinitValue(allocator, decoded);
+        try std.testing.expectEqualSlices(u8, &.{c.decodes_to}, decoded.string);
+    }
+}

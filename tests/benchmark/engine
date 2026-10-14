@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Runs performance-profile (flake input performance-profiling) for c0: builds the ReleaseFast
+# benchmark adapter so the measured binary matches the source, defaults the history URL, and passes
+# this project's configuration. A missing engine is an error, never a pass. Run inside the dev shell.
+set -u
+root=$(cd -- "$(dirname -- "$0")/../.." && pwd)
+command -v performance-profile >/dev/null || { printf 'performance-profile not on PATH; run inside the dev shell (nix develop -c ...)\n' >&2; exit 1; }
+"$root/tests/benchmark/build-bench" ReleaseFast >/dev/null || { printf 'engine: building c0-bench failed\n' >&2; exit 1; }
+export PERFORMANCE_HISTORY_URL="${PERFORMANCE_HISTORY_URL:-file://$HOME/.local/state/performance-history}"
+cd "$root" || exit 1
+exec performance-profile "$@" --config "$root/profiling.json"

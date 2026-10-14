@@ -298,4 +298,28 @@ pub fn build(b: *std.Build) void {
     });
     const run_png_demo_tests = b.addRunArtifact(png_demo_tests);
     test_step.dependOn(&run_png_demo_tests.step);
+
+    // Benchmark adapter for the performance-profile engine (./cg, ./mg, ./bm). It imports the
+    // core directly because the C ABI takes no allocator and the memory gate must count every
+    // allocation; the C CLI remains the FFI's dogfooding consumer. Not part of the default install.
+    const bench = b.addExecutable(.{
+        .name = "c0-bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/benchmark/c0_bench.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "c0_core", .module = core_mod },
+            },
+        }),
+    });
+    const bench_step = b.step("bench", "Build the c0-bench benchmark adapter");
+    bench_step.dependOn(&b.addInstallArtifact(bench, .{}).step);
+    const bench_tests = b.addTest(.{ .root_module = bench.root_module });
+    test_step.dependOn(&b.addRunArtifact(bench_tests).step);
+    test_compile_step.dependOn(&b.addInstallArtifact(bench_tests, .{
+        .dest_dir = .{ .override = .{ .custom = "test-bins" } },
+        .dest_sub_path = "bench_tests",
+    }).step);
 }

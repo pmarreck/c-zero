@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# ./bm: fixed-workload CPU time of one 16384-entry round trip (single-core and 12-core cases),
+# checked by performance-profile against this project's external history. Cases are in
+# profiling.json; the adapter is tests/benchmark/c0_bench.zig. Extra arguments go to
+# performance-profile (for example --case NAME). Run inside the dev shell: nix develop -c ./bm
+# History goes to $PERFORMANCE_HISTORY_URL (default file://$HOME/.local/state/performance-history).
+exec "$(dirname "${BASH_SOURCE[0]}")/tests/benchmark/engine" run --mode bm "$@"
