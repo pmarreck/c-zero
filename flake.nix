@@ -133,6 +133,10 @@
 							zig
 							pkgs.git
 							pkgs.jq
+						]
+						# The engine is not built for every system (no x86_64-darwin); without it
+						# ./cg, ./mg and ./bm fail loudly instead of passing.
+						++ pkgs.lib.optionals (performance-profiling.packages ? ${system}) [
 							performance-profiling.packages.${system}.default
 						];
 						shellHook = ''
