@@ -30,33 +30,33 @@ pub fn build(b: *std.Build) void {
 
     // Codec module (with LZ4 C dependency for BG3 codec)
     const codec_mod = b.addModule("c0_codec", .{
-        .root_source_file = b.path("src/codec/mod.zig"),
+        .root_source_file = b.path("codecs/mod.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
             .{ .name = "c0_core", .module = core_mod },
         },
     });
-    codec_mod.addIncludePath(b.path("lib/lz4"));
+    codec_mod.addIncludePath(b.path("codecs/vendor/lz4"));
     codec_mod.addCSourceFile(.{
-        .file = b.path("lib/lz4/lz4.c"),
+        .file = b.path("codecs/vendor/lz4/lz4.c"),
         .flags = &.{"-std=c99"},
     });
     codec_mod.addCSourceFile(.{
-        .file = b.path("lib/lz4/lz4frame.c"),
+        .file = b.path("codecs/vendor/lz4/lz4frame.c"),
         .flags = &.{"-std=c99"},
     });
     codec_mod.addCSourceFile(.{
-        .file = b.path("lib/lz4/xxhash.c"),
+        .file = b.path("codecs/vendor/lz4/xxhash.c"),
         .flags = &.{"-std=c99"},
     });
     codec_mod.addCSourceFile(.{
-        .file = b.path("lib/lz4/lz4hc.c"),
+        .file = b.path("codecs/vendor/lz4/lz4hc.c"),
         .flags = &.{"-std=c99"},
     });
-    codec_mod.addIncludePath(b.path("lib/zstd"));
+    codec_mod.addIncludePath(b.path("codecs/vendor/zstd"));
     codec_mod.addCSourceFile(.{
-        .file = b.path("lib/zstd/zstd.c"),
+        .file = b.path("codecs/vendor/zstd/zstd.c"),
         .flags = &.{"-std=c99"},
     });
     // zlib include path for PDF codec's @cImport("zlib.h")
@@ -136,33 +136,33 @@ pub fn build(b: *std.Build) void {
 
     // Codec tests
     const codec_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/codec/mod.zig"),
+        .root_source_file = b.path("codecs/mod.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
             .{ .name = "c0_core", .module = core_mod },
         },
     });
-    codec_test_mod.addIncludePath(b.path("lib/lz4"));
+    codec_test_mod.addIncludePath(b.path("codecs/vendor/lz4"));
     codec_test_mod.addCSourceFile(.{
-        .file = b.path("lib/lz4/lz4.c"),
+        .file = b.path("codecs/vendor/lz4/lz4.c"),
         .flags = &.{"-std=c99"},
     });
     codec_test_mod.addCSourceFile(.{
-        .file = b.path("lib/lz4/lz4frame.c"),
+        .file = b.path("codecs/vendor/lz4/lz4frame.c"),
         .flags = &.{"-std=c99"},
     });
     codec_test_mod.addCSourceFile(.{
-        .file = b.path("lib/lz4/xxhash.c"),
+        .file = b.path("codecs/vendor/lz4/xxhash.c"),
         .flags = &.{"-std=c99"},
     });
     codec_test_mod.addCSourceFile(.{
-        .file = b.path("lib/lz4/lz4hc.c"),
+        .file = b.path("codecs/vendor/lz4/lz4hc.c"),
         .flags = &.{"-std=c99"},
     });
-    codec_test_mod.addIncludePath(b.path("lib/zstd"));
+    codec_test_mod.addIncludePath(b.path("codecs/vendor/zstd"));
     codec_test_mod.addCSourceFile(.{
-        .file = b.path("lib/zstd/zstd.c"),
+        .file = b.path("codecs/vendor/zstd/zstd.c"),
         .flags = &.{"-std=c99"},
     });
     // zlib include path for PDF codec tests
