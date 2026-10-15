@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ./cg: input-growth gates: per-doubling CPU-time ratios of round-tripping 2048 to 16384 generated entries (single-core and 12-core cases),
+# ./cg: input-growth gates: per-doubling CPU-time ratios of round-tripping 8192 to 65536 generated entries (single-core and 12-core cases),
 # checked by performance-profile against this project's external history. Cases are in
 # profiling.json; the adapter is tests/benchmark/c0_bench.zig. Extra arguments go to
 # performance-profile (for example --case NAME). Run inside the dev shell: nix develop -c ./cg

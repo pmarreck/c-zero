@@ -34,8 +34,11 @@ no claim that general round trips are correct.
 
 The bounds classify complexity; the history comparison catches smaller regressions.
 
-- CPU growth `[1.8, 2.25]` per doubling: linear work gives 2.0. An n log n algorithm at these
-  sizes would drift toward the upper bound; quadratic work gives 4.
+- CPU growth `[1.8, 2.25]` per doubling over 8192 to 65536 entries (about 10 to 80 ms per
+  sample): linear work gives 2.0. An n log n algorithm at these sizes would drift toward the upper
+  bound; quadratic work gives 4. The first definition started at 2048 entries (about 2.4 ms),
+  which proved too short to time on a loaded shared host: the smallest size alone ran up to 40%
+  slow and failed the shape check while the measured binary was byte-identical to a passing run.
 - Peak heap `[1.5, 2.6]` per doubling: linear on average, but the encoder's output buffer grows in
   1.5x capacity steps and every run uses a fresh seed, so single doublings jitter around 2. The
   first observation measured 2.07, 2.07 and 1.86 (geometric mean 1.996). Quadratic growth gives 4.

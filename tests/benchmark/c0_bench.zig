@@ -20,8 +20,10 @@ const posix = std.posix;
 const Value = core.Value;
 const Entry = core.Entry;
 
-/// Native code with no JIT: one untimed round trip per size settles caches and the allocator.
-const warmup_runs = 1;
+/// Untimed round trips per size before sampling. One was not enough: the first size measured
+/// ran up to 40% slow with high spread while later sizes were tight, consistent with glibc malloc
+/// still adapting its mmap threshold and faulting in fresh pages during the first runs.
+const warmup_runs = 3;
 const samples_per_size = 5;
 const max_string_len = 32;
 const max_element_len = 16;
