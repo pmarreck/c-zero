@@ -99,9 +99,9 @@ nix develop -c zig build -Doptimize=ReleaseFast
 C0 uses a hexagonal architecture:
 
 - **Core** (`src/core/`) - Pure Zig encode/decode logic with no I/O
-- **Codec** (`src/codec/`) - Plugin system for binary format expansion/collapse
-- **FFI** (`ffi/`) - Arena-based C API for external consumers
-- **CLI** (`cli/`) - C command-line tool using FFI
+- **FFI** (`ffi/`) - Arena-based C API for external consumers; `libc0` contains only the format
+- **CLI** (`cli/`) - C command-line tool using the FFI
+- **Codecs** (`codecs/`) - Real-world format codecs, each shipped as a separate `c0-codec-<name>` plugin executable that the CLI runs over the plugin protocol (see [Codec plugins](#codec-plugins-protocol-c0-codec1))
 
 ### Data Types
 
@@ -190,15 +190,22 @@ The "PNG" and "Hello from binary!" parts remain readable, while control bytes be
 
 ## Codec System
 
-C0 includes a codec plugin architecture that transforms binary file formats into human-readable, editable C0 text — and back again with lossless round-trips.
+Codecs transform binary file formats into human-readable, editable C0 text and back again with lossless round trips. Every codec, including the bundled ones, is a separate plugin executable; the `c0` library and CLI contain no format-specific code. The bundled codecs exist to test the format against real-world data.
 
-### Built-in Codecs
+### Bundled Codecs
+
+These install as `c0-codec-<name>` executables beside `c0`.
 
 | Codec | Extensions | Modes | Description |
 |-------|-----------|-------|-------------|
 | `png` | `.png` | faithful, editable | PNG image format (lossless chunk destructuring) |
 | `bg3` | `.lsv`, `.pak`, `.lsf` | faithful | Baldur's Gate 3 save files (LSPK packages and LSF data) |
 | `json` | `.json` | faithful, editable | JSON format (bidirectional with type-prefixed scalars) |
+| `jpeg` | `.jpg`, `.jpeg`, `.jpe`, `.jfif` | faithful, editable | JPEG image format with EXIF metadata parsing |
+| `tiff` | `.tif`, `.tiff` | faithful, editable | TIFF image format with IFD metadata parsing |
+| `pdf` | `.pdf` | faithful, editable | Portable Document Format; `--pages RANGE` limits expansion |
+
+`c0 codecs` lists the plugins found and `c0 codecs <name>` shows one codec's options and help.
 
 ### Expand / Collapse
 
@@ -319,28 +326,33 @@ c0 expand data.json | c0 to-json
 
 > **`to-json` vs JSON codec**: The `json` codec (`c0 expand/collapse`) does type-preserving round-trips using prefixes (`"` = string, `i` = int, `f` = float, `bT`/`bF` = bool, `n` = null). The `to-json` command is a dumb pipe — it turns any C0 into valid JSON for external tools, but doesn't interpret or strip type prefixes. Use the codec for JSON editing, `to-json` for interop.
 
-### External Codecs (Subprocess Protocol)
+### Codec plugins (protocol `c0-codec/1`)
 
-You can extend C0 with your own codecs. Place an executable named `c0-codec-<name>` in `~/.c0/codecs/` or anywhere on your `PATH`. It must support three subcommands:
+A codec is any executable named `c0-codec-<name>` (`c0-codec-<name>.exe` on Windows). The CLI searches, in order:
+
+1. the directories in `$C0_CODEC_PATH`, if set (`:`-separated, `;` on Windows); nothing else is searched then;
+2. otherwise the directory holding the `c0` executable (the bundled codecs), then `~/.c0/codecs/`, then `PATH`.
+
+The first plugin found for a name wins. A plugin supports three subcommands; its diagnostics go to stderr and a nonzero exit means failure:
 
 ```bash
-c0-codec-myformat info                 # Print codec metadata as C0 to stdout
-c0-codec-myformat expand [--editable]  # stdin: raw bytes -> stdout: C0 text
-c0-codec-myformat collapse [--editable] # stdin: C0 text -> stdout: raw bytes
+c0-codec-myformat info                                         # stdout: codec metadata as compact C0
+c0-codec-myformat expand [--editable] [--compact] [--KEY VALUE]...   # stdin: raw bytes -> stdout: C0 text
+c0-codec-myformat collapse [--editable] [--KEY VALUE]...             # stdin: C0 text -> stdout: raw bytes
 ```
 
-The `info` subcommand outputs C0-formatted metadata:
+`info` prints an object whose values are strings, arrays and objects (booleans are `true`/`false`, numbers decimal text, magic bytes lowercase hex):
+
 ```
-{name:myformat,description:My custom format,extensions:[.myf],supports_faithful:true,supports_editable:true}
+{protocol:c0-codec/1,name:myformat,description:My custom format,extensions:[.myf],magic:[{offset:0,hex:4d5946}],format_names:[myformat],faithful:true,editable:true,help:Longer help,args:[{name:level,value_name:N,description:Detail level}]}
 ```
 
-Built-in codecs always take priority over subprocess codecs with the same name. Subprocess codecs are discovered automatically and listed by `c0 codecs`.
+The CLI validates `--KEY VALUE` options against `args` before starting the plugin, detects formats with `magic` and `extensions`, and picks the collapse codec from a document's `format` field using `format_names`. The full contract is in [docs/plan_context/codec_plugins.md](docs/plan_context/codec_plugins.md).
 
 ### Future Codecs
 
 Interesting candidates for built-in or community codecs:
 
-- **PDF** - Document structure, page objects, embedded fonts/images
 - **JPEG XL** - Next-gen image format with rich metadata and progressive layers
 - **Dead Cells** (save files) - Roguelike game save data editing
 - **SQLite** - Database file format with tables, indexes, and pages

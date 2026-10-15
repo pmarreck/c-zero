@@ -4,6 +4,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Package version, kept in step with build.zig.zon; reported by plugin --about.
+    const version = "0.1.0";
+
     // External dependencies
     const pb_dep = b.dependency("printable_binary", .{
         .target = target,
@@ -11,14 +14,14 @@ pub fn build(b: *std.Build) void {
     });
     const pb_mod = pb_dep.module("printable_binary");
 
-    // zlib for PDF FlateDecode (zlib license, allyourcodebase/zlib)
+    // zlib for the PDF codec's FlateDecode (zlib license, allyourcodebase/zlib)
     const zlib_dep = b.dependency("zlib", .{
         .target = target,
         .optimize = optimize,
     });
     const zlib_lib = zlib_dep.artifact("z");
 
-    // Core module
+    // Core module: the C0 format itself, pure Zig with no C dependencies
     const core_mod = b.addModule("c0_core", .{
         .root_source_file = b.path("src/core/mod.zig"),
         .target = target,
@@ -28,7 +31,30 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    // Codec module (with LZ4 C dependency for BG3 codec)
+    // Vendored compression libraries used only by the BG3 codec plugin
+    const lz4_lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "lz4",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true }),
+    });
+    lz4_lib.root_module.addCSourceFiles(.{
+        .root = b.path("codecs/vendor/lz4"),
+        .files = &.{ "lz4.c", "lz4frame.c", "xxhash.c", "lz4hc.c" },
+        .flags = &.{"-std=c99"},
+    });
+    const zstd_lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "zstd",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true }),
+    });
+    zstd_lib.root_module.addCSourceFiles(.{
+        .root = b.path("codecs/vendor/zstd"),
+        .files = &.{"zstd.c"},
+        .flags = &.{"-std=c99"},
+    });
+
+    // Codec module: the pure logic of every codec. It carries the C headers its @cImport
+    // calls need; each consumer links only the C libraries for the codecs it references.
     const codec_mod = b.addModule("c0_codec", .{
         .root_source_file = b.path("codecs/mod.zig"),
         .target = target,
@@ -38,42 +64,22 @@ pub fn build(b: *std.Build) void {
         },
     });
     codec_mod.addIncludePath(b.path("codecs/vendor/lz4"));
-    codec_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/lz4/lz4.c"),
-        .flags = &.{"-std=c99"},
-    });
-    codec_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/lz4/lz4frame.c"),
-        .flags = &.{"-std=c99"},
-    });
-    codec_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/lz4/xxhash.c"),
-        .flags = &.{"-std=c99"},
-    });
-    codec_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/lz4/lz4hc.c"),
-        .flags = &.{"-std=c99"},
-    });
     codec_mod.addIncludePath(b.path("codecs/vendor/zstd"));
-    codec_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/zstd/zstd.c"),
-        .flags = &.{"-std=c99"},
-    });
-    // zlib include path for PDF codec's @cImport("zlib.h")
     codec_mod.addIncludePath(zlib_lib.getEmittedIncludeTree());
 
-    // FFI module
-    const ffi_mod = b.addModule("c0_ffi", .{
-        .root_source_file = b.path("ffi/c_api.zig"),
+    // Plugin adapter: wraps a codec type in the c0_plugin.h C ABI
+    const plugin_mod = b.createModule(.{
+        .root_source_file = b.path("codecs/plugin.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
         .imports = &.{
             .{ .name = "c0_core", .module = core_mod },
             .{ .name = "c0_codec", .module = codec_mod },
         },
     });
 
-    // Static library (libc0.a)
+    // Static library (libc0.a): the C0 format only. Codecs live in plugin executables.
     const lib = b.addLibrary(.{
         .linkage = .static,
         .name = "c0",
@@ -83,15 +89,13 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "c0_core", .module = core_mod },
-                .{ .name = "c0_codec", .module = codec_mod },
             },
         }),
     });
     lib.installHeader(b.path("ffi/c0.h"), "c0.h");
-    lib.root_module.linkLibrary(zlib_lib);
     b.installArtifact(lib);
 
-    // C CLI executable
+    // C CLI executable; reaches codecs only through the c0-codec/1 plugin protocol
     const cli = b.addExecutable(.{
         .name = "c0",
         .root_module = b.createModule(.{
@@ -100,13 +104,64 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
-    cli.root_module.addCSourceFile(.{
-        .file = b.path("cli/main.c"),
+    cli.root_module.addCSourceFiles(.{
+        .files = &.{ "cli/main.c", "cli/codec_host.c" },
         .flags = &.{ "-std=c99", "-Wall", "-Wextra" },
     });
     cli.root_module.addIncludePath(b.path("ffi"));
     cli.root_module.linkLibrary(lib);
     b.installArtifact(cli);
+
+    // Codec plugin executables (c0-codec-<name>): the shared C host codecs/plugin_main.c
+    // performs all I/O and calls the codec's Zig library through codecs/c0_plugin.h.
+    const PluginSpec = struct { name: []const u8, lz4_zstd: bool = false, zlib: bool = false };
+    const plugin_specs = [_]PluginSpec{
+        .{ .name = "png" },
+        .{ .name = "bg3", .lz4_zstd = true },
+        .{ .name = "json" },
+        .{ .name = "jpeg" },
+        .{ .name = "tiff" },
+        .{ .name = "pdf", .zlib = true },
+    };
+    for (plugin_specs) |spec| {
+        const codec_lib = b.addLibrary(.{
+            .linkage = .static,
+            .name = b.fmt("c0_codec_{s}", .{spec.name}),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.fmt("codecs/plugins/{s}.zig", .{spec.name})),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+                .imports = &.{
+                    .{ .name = "c0_plugin", .module = plugin_mod },
+                    .{ .name = "c0_codec", .module = codec_mod },
+                },
+            }),
+        });
+        const plugin_exe = b.addExecutable(.{
+            .name = b.fmt("c0-codec-{s}", .{spec.name}),
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }),
+        });
+        plugin_exe.root_module.addCSourceFile(.{
+            .file = b.path("codecs/plugin_main.c"),
+            .flags = &.{
+                "-std=c99",                                         "-Wall", "-Wextra",
+                b.fmt("-DC0_PLUGIN_NAME=\"{s}\"", .{spec.name}), "-DC0_VERSION=\"" ++ version ++ "\"",
+            },
+        });
+        plugin_exe.root_module.addIncludePath(b.path("codecs"));
+        plugin_exe.root_module.linkLibrary(codec_lib);
+        if (spec.lz4_zstd) {
+            plugin_exe.root_module.linkLibrary(lz4_lib);
+            plugin_exe.root_module.linkLibrary(zstd_lib);
+        }
+        if (spec.zlib) plugin_exe.root_module.linkLibrary(zlib_lib);
+        b.installArtifact(plugin_exe);
+    }
 
     // Core tests
     const core_tests = b.addTest(.{
@@ -128,58 +183,42 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "c0_core", .module = core_mod },
-                .{ .name = "c0_codec", .module = codec_mod },
             },
         }),
     });
-    ffi_tests.root_module.linkLibrary(zlib_lib);
 
-    // Codec tests
-    const codec_test_mod = b.createModule(.{
-        .root_source_file = b.path("codecs/mod.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "c0_core", .module = core_mod },
-        },
-    });
-    codec_test_mod.addIncludePath(b.path("codecs/vendor/lz4"));
-    codec_test_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/lz4/lz4.c"),
-        .flags = &.{"-std=c99"},
-    });
-    codec_test_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/lz4/lz4frame.c"),
-        .flags = &.{"-std=c99"},
-    });
-    codec_test_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/lz4/xxhash.c"),
-        .flags = &.{"-std=c99"},
-    });
-    codec_test_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/lz4/lz4hc.c"),
-        .flags = &.{"-std=c99"},
-    });
-    codec_test_mod.addIncludePath(b.path("codecs/vendor/zstd"));
-    codec_test_mod.addCSourceFile(.{
-        .file = b.path("codecs/vendor/zstd/zstd.c"),
-        .flags = &.{"-std=c99"},
-    });
-    // zlib include path for PDF codec tests
-    codec_test_mod.addIncludePath(zlib_lib.getEmittedIncludeTree());
+    // Codec tests: every codec, so every codec's C library
     const codec_tests = b.addTest(.{
-        .root_module = codec_test_mod,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("codecs/mod.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "c0_core", .module = core_mod },
+            },
+        }),
     });
+    codec_tests.root_module.addIncludePath(b.path("codecs/vendor/lz4"));
+    codec_tests.root_module.addIncludePath(b.path("codecs/vendor/zstd"));
+    codec_tests.root_module.addIncludePath(zlib_lib.getEmittedIncludeTree());
+    codec_tests.root_module.linkLibrary(lz4_lib);
+    codec_tests.root_module.linkLibrary(zstd_lib);
     codec_tests.root_module.linkLibrary(zlib_lib);
+
+    // Plugin adapter tests
+    const plugin_tests = b.addTest(.{ .root_module = plugin_mod });
 
     const run_core_tests = b.addRunArtifact(core_tests);
     const run_ffi_tests = b.addRunArtifact(ffi_tests);
     const run_codec_tests = b.addRunArtifact(codec_tests);
+    const run_plugin_tests = b.addRunArtifact(plugin_tests);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_core_tests.step);
     test_step.dependOn(&run_ffi_tests.step);
     test_step.dependOn(&run_codec_tests.step);
+    test_step.dependOn(&run_plugin_tests.step);
 
     // Lets CI build test binaries without running them (so patchelf can fix
     // up the FHS dynamic-linker path that Zig bakes into libc-linked exes
@@ -197,8 +236,11 @@ pub fn build(b: *std.Build) void {
         .dest_dir = .{ .override = .{ .custom = "test-bins" } },
         .dest_sub_path = "codec_tests",
     }).step);
+    test_compile_step.dependOn(&b.addInstallArtifact(plugin_tests, .{
+        .dest_dir = .{ .override = .{ .custom = "test-bins" } },
+        .dest_sub_path = "plugin_tests",
+    }).step);
 
-    _ = ffi_mod;
 
     // JSON demo executable
     const json_demo = b.addExecutable(.{

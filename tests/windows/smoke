@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Windows plugin-host smoke test: cross-builds c0 and the codec plugins for x86_64-windows and
+# runs them under Wine. Covers discovery beside the executable (GetModuleFileNameA,
+# FindFirstFileA), CreateProcess spawning with a writer thread, binary stdio, and exit-status
+# propagation, comparing outputs with the native Linux build. Without Wine the check is reported
+# as not run and fails, so a missing Windows check is never silently green.
+# Usage: tests/windows/smoke   (from the dev shell, after the native ReleaseFast build)
+set -u
+root=$(cd -- "$(dirname -- "$0")/../.." && pwd)
+failures=0
+fail() { failures=$((failures+1)); printf 'FAIL: %s\n' "$*" >&2; }
+check() { if [[ "${2-}" == "${3-}" ]]; then :; else fail "$1: expected [${2-}], got [${3-}]"; fi; }
+
+if ! command -v wine >/dev/null; then
+	printf 'Windows smoke test NOT RUN: wine is not installed\n' >&2
+	exit 1
+fi
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/c0-win-smoke.XXXXXX") || exit 1
+trap 'rm -rf -- "$scratch"' EXIT
+cache="${ZIG_GLOBAL_CACHE_DIR:-$HOME/.cache/zig}"
+(cd "$root" && zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast --prefix "$scratch/win" --global-cache-dir "$cache") \
+	|| { printf 'FAIL: Windows cross-build\n' >&2; exit 1; }
+export WINEDEBUG=-all WINEPREFIX="$scratch/prefix"
+unset C0_CODEC_PATH
+win() { wine "$scratch/win/bin/c0.exe" "$@" 2>"$scratch/stderr"; }
+native() { C0_CODEC_PATH="$root/zig-out/bin" "$root/zig-out/bin/c0" "$@"; }
+
+listing=$(win codecs | tr -d '\r')
+for codec in png bg3 json jpeg tiff pdf; do
+	[[ $listing == *"  $codec  ["* ]] || fail "windows lists bundled $codec"
+done
+
+printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x00\x00\x00\x00\x3a\x7e\x9b\x55\x00\x00\x00\x0aIDATx\x9cc\x60\x00\x00\x00\x02\x00\x01\x48\xaf\xa4\x71\x00\x00\x00\x00IEND\xaeB`\x82' >"$scratch/one.png"
+win expand --editable "$scratch/one.png" >"$scratch/win.c0"
+check "windows png expand matches native" "$(native expand --editable "$scratch/one.png" | cksum)" "$(cksum <"$scratch/win.c0")"
+win collapse --editable "$scratch/win.c0" >"$scratch/win.png"
+check "windows png editable round trip" "$(cksum <"$scratch/one.png")" "$(cksum <"$scratch/win.png")"
+
+bg3="$root/tests/fixtures/bg3_save.lsv"
+win expand "$bg3" >"$scratch/win_bg3.c0"
+check "windows bg3 expand (17 MB through pipes) matches native" "$(native expand "$bg3" | cksum)" "$(cksum <"$scratch/win_bg3.c0")"
+
+printf '{"a":' >"$scratch/bad.json"
+win expand "$scratch/bad.json" >"$scratch/bad.out"
+check "windows plugin failure exit" 1 "$?"
+grep -q "codec 'json' failed (exit 1)" "$scratch/stderr" || fail "windows plugin failure message"
+
+if [[ $failures -eq 0 ]]; then printf 'Windows smoke test (Wine): all checks passed\n'; else printf 'Windows smoke test: %d failures\n' "$failures" >&2; exit 1; fi

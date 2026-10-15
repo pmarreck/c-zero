@@ -9,11 +9,11 @@ failures=0
 fail() { failures=$((failures+1)); printf 'FAIL: %s\n' "$*" >&2; }
 expect_eq() { [[ "${2-}" == "${3-}" ]] || fail "$1: expected [${2-}], got [${3-}]"; }
 expect_contains() { [[ "$2" == *"$3"* ]] || fail "$1: [$2] lacks [$3]"; }
-capture() { # sets out, err, rc
+capture() { # sets cap_out, cap_err, rc (names chosen to avoid stdenv exports such as $out)
 	local ef
 	ef=$(mktemp "${TMPDIR:-/tmp}/c0-bench-test.XXXXXX")
-	out=$("$@" 2>"$ef"); rc=$?
-	err=$(<"$ef"); rm -f -- "$ef"
+	cap_out=$("$@" 2>"$ef"); rc=$?
+	cap_err=$(<"$ef"); rm -f -- "$ef"
 }
 
 bench=$("$root/tests/benchmark/build-bench" ReleaseFast 2>/dev/null) || { printf 'FAIL: ReleaseFast c0-bench did not build\n' >&2; exit 1; }
@@ -23,34 +23,34 @@ debug_bench=$("$root/tests/benchmark/build-bench" Debug 2>/dev/null) || { printf
 seed=780c6954f07ad243ede1e7d63b406489
 capture "$bench" case 64,128 "$seed"
 expect_eq "clean run exit" 0 "$rc"
-expect_eq "clean run stderr" "" "$err"
-expect_eq "clean run claims" "true ReleaseFast 64,128 $seed" "$(printf '%s' "$out" | jq -r '"\(.correct) \(.build_mode) \([.rows[].size] | map(tostring) | join(",")) \(.seed)"')"
-expect_eq "every metric has five samples" "5" "$(printf '%s' "$out" | jq -r '[.rows[].samples[] | length] | unique | map(tostring) | join(",")')"
-expect_eq "no residual heap" "0" "$(printf '%s' "$out" | jq -r '[.rows[].residual_bytes[]] | unique | map(tostring) | join(",")')"
-expect_contains "domain names the exclusion" "$(printf "%s" "$out" | jq -r .domain)" "c0-smart-encoding-roundtrip pending"
-expect_eq "positive timings" "true" "$(printf '%s' "$out" | jq -r '[.rows[].samples.cpu_ns[], .rows[].samples.wall_ns[]] | all(. > 0)')"
-first_bytes=$(printf '%s' "$out" | jq -r '.rows[0].encoded_bytes')
+expect_eq "clean run stderr" "" "$cap_err"
+expect_eq "clean run claims" "true ReleaseFast 64,128 $seed" "$(printf '%s' "$cap_out" | jq -r '"\(.correct) \(.build_mode) \([.rows[].size] | map(tostring) | join(",")) \(.seed)"')"
+expect_eq "every metric has five samples" "5" "$(printf '%s' "$cap_out" | jq -r '[.rows[].samples[] | length] | unique | map(tostring) | join(",")')"
+expect_eq "no residual heap" "0" "$(printf '%s' "$cap_out" | jq -r '[.rows[].residual_bytes[]] | unique | map(tostring) | join(",")')"
+expect_contains "domain names the exclusion" "$(printf "%s" "$cap_out" | jq -r .domain)" "c0-smart-encoding-roundtrip pending"
+expect_eq "positive timings" "true" "$(printf '%s' "$cap_out" | jq -r '[.rows[].samples.cpu_ns[], .rows[].samples.wall_ns[]] | all(. > 0)')"
+first_bytes=$(printf '%s' "$cap_out" | jq -r '.rows[0].encoded_bytes')
 capture "$bench" case 64 "$seed"
-expect_eq "same seed, same fixture" "$first_bytes" "$(printf '%s' "$out" | jq -r '.rows[0].encoded_bytes')"
+expect_eq "same seed, same fixture" "$first_bytes" "$(printf '%s' "$cap_out" | jq -r '.rows[0].encoded_bytes')"
 capture "$bench" case 64 a3d4de67ddb6ca23ca7b4e788b7f0377
-other_bytes=$(printf '%s' "$out" | jq -r '.rows[0].encoded_bytes')
+other_bytes=$(printf '%s' "$cap_out" | jq -r '.rows[0].encoded_bytes')
 [[ $other_bytes != "$first_bytes" ]] || fail "different seed should change the fixture (both $first_bytes bytes)"
 
 capture "$debug_bench" case 64 "$seed"
 expect_eq "debug build exit" 1 "$rc"
-expect_eq "debug build stdout" "" "$out"
-expect_contains "debug build reason" "$err" "built Debug; benchmarks need ReleaseFast"
+expect_eq "debug build stdout" "" "$cap_out"
+expect_contains "debug build reason" "$cap_err" "built Debug; benchmarks need ReleaseFast"
 
 capture "$bench" case 64 ""
 expect_eq "rejects empty seed exit" 1 "$rc"
-expect_eq "rejects empty seed stdout" "" "$out"
-expect_contains "rejects empty seed reason" "$err" "c0-bench: "
+expect_eq "rejects empty seed stdout" "" "$cap_out"
+expect_contains "rejects empty seed reason" "$cap_err" "c0-bench: "
 for args in "case 64" "case 0 9" "case x 9" "case , 9"; do
 	# shellcheck disable=SC2086
 	capture "$bench" $args
 	expect_eq "rejects [$args] exit" 1 "$rc"
-	expect_eq "rejects [$args] stdout" "" "$out"
-	expect_contains "rejects [$args] reason" "$err" "c0-bench: "
+	expect_eq "rejects [$args] stdout" "" "$cap_out"
+	expect_contains "rejects [$args] reason" "$cap_err" "c0-bench: "
 done
 
 if [[ $failures -eq 0 ]]; then printf 'benchmark adapter: all checks passed\n'; else printf 'benchmark adapter: %d failures\n' "$failures" >&2; exit 1; fi

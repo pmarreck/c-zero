@@ -7,9 +7,9 @@
  * Commands:
  *   encode   - Read stdin as text, encode as C0 string, write binary to stdout
  *   decode   - Read stdin as C0 binary, pretty-print the structure
- *   expand   - Read file, expand via codec to C0 on stdout
- *   collapse - Read C0 (file or stdin), write native format to stdout
- *   codecs   - List available codecs
+ *   expand   - Read file, expand via a codec plugin to C0 on stdout
+ *   collapse - Read C0 (file or stdin), write native format via a codec plugin
+ *   codecs   - List codec plugins (c0-codec-<name> executables, protocol c0-codec/1)
  *
  * Usage:
  *   c0 encode < input.txt > output.c0
@@ -25,15 +25,11 @@
 #include <string.h>
 #include "../ffi/c0.h"
 
-/* Subprocess codec protocol (POSIX only) */
+#include "codec_host.h"
+
 #ifdef _WIN32
-#define HAS_SUBPROCESS_CODECS 0
-#else
-#define HAS_SUBPROCESS_CODECS 1
-#include <unistd.h>
-#include <sys/wait.h>
-#include <dirent.h>
-#include <sys/stat.h>
+#include <fcntl.h>
+#include <io.h>
 #endif
 
 #define INITIAL_BUFFER_SIZE 4096
@@ -54,257 +50,13 @@ static char* read_file(const char* path, size_t* out_len);
 static void print_indent(int level);
 static void print_escaped_string(const char* data, size_t len);
 
-/* =========================================================================
- * Subprocess Codec Protocol
- *
- * External codecs are executables named "c0-codec-<name>" found in PATH
- * or ~/.c0/codecs/. They support three subcommands:
- *   c0-codec-<name> info              -> C0 metadata to stdout
- *   c0-codec-<name> expand [--editable]  -> stdin: raw bytes, stdout: C0 text
- *   c0-codec-<name> collapse [--editable] -> stdin: C0 text, stdout: raw bytes
- *
- * Built-in codecs always take priority over subprocess codecs.
- * ========================================================================= */
+/* argv[0] of this process, used to find codec plugins bundled beside the executable */
+static const char* program_path = NULL;
 
-#if HAS_SUBPROCESS_CODECS
-
-#define SUBPROCESS_CODEC_PREFIX "c0-codec-"
-#define SUBPROCESS_CODEC_PREFIX_LEN 9
-#define MAX_SUBPROCESS_CODECS 64
-
-typedef struct {
-    char name[256];
-    char path[4096];
-} SubprocessCodec;
-
-static SubprocessCodec subprocess_codecs[MAX_SUBPROCESS_CODECS];
-static size_t subprocess_codec_count = 0;
-static int subprocess_codecs_discovered = 0;
-
-static int is_executable(const char* path) {
-    struct stat st;
-    if (stat(path, &st) != 0) return 0;
-    return S_ISREG(st.st_mode) && (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH));
-}
-
-static void add_subprocess_codec(const char* name, const char* path) {
-    if (subprocess_codec_count >= MAX_SUBPROCESS_CODECS) return;
-
-    /* Skip if name matches a built-in codec */
-    size_t builtin_count = c0_codec_count();
-    for (size_t i = 0; i < builtin_count; i++) {
-        C0CodecInfo info = c0_codec_info(NULL, i);
-        if (strlen(name) == info.name_len &&
-            memcmp(name, info.name, info.name_len) == 0) {
-            return;
-        }
-    }
-
-    /* Skip if already discovered */
-    for (size_t i = 0; i < subprocess_codec_count; i++) {
-        if (strcmp(subprocess_codecs[i].name, name) == 0) return;
-    }
-
-    strncpy(subprocess_codecs[subprocess_codec_count].name, name, 255);
-    subprocess_codecs[subprocess_codec_count].name[255] = '\0';
-    strncpy(subprocess_codecs[subprocess_codec_count].path, path, 4095);
-    subprocess_codecs[subprocess_codec_count].path[4095] = '\0';
-    subprocess_codec_count++;
-}
-
-static void scan_dir_for_codecs(const char* dir_path) {
-    DIR* dir = opendir(dir_path);
-    if (!dir) return;
-
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strncmp(entry->d_name, SUBPROCESS_CODEC_PREFIX,
-                    SUBPROCESS_CODEC_PREFIX_LEN) != 0)
-            continue;
-
-        const char* codec_name = entry->d_name + SUBPROCESS_CODEC_PREFIX_LEN;
-        if (codec_name[0] == '\0') continue;
-
-        char full_path[4096];
-        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
-
-        if (is_executable(full_path)) {
-            add_subprocess_codec(codec_name, full_path);
-        }
-    }
-
-    closedir(dir);
-}
-
-static void discover_subprocess_codecs(void) {
-    if (subprocess_codecs_discovered) return;
-    subprocess_codecs_discovered = 1;
-
-    /* Search ~/.c0/codecs/ first (user codecs) */
-    const char* home = getenv("HOME");
-    if (home) {
-        char codecs_dir[4096];
-        snprintf(codecs_dir, sizeof(codecs_dir), "%s/.c0/codecs", home);
-        scan_dir_for_codecs(codecs_dir);
-    }
-
-    /* Search PATH */
-    const char* path_env = getenv("PATH");
-    if (!path_env) return;
-
-    char* path_copy = strdup(path_env);
-    if (!path_copy) return;
-
-    char* saveptr = NULL;
-    char* dir = strtok_r(path_copy, ":", &saveptr);
-    while (dir) {
-        scan_dir_for_codecs(dir);
-        dir = strtok_r(NULL, ":", &saveptr);
-    }
-
-    free(path_copy);
-}
-
-static const SubprocessCodec* find_subprocess_codec(const char* name) {
-    discover_subprocess_codecs();
-    for (size_t i = 0; i < subprocess_codec_count; i++) {
-        if (strcmp(subprocess_codecs[i].name, name) == 0)
-            return &subprocess_codecs[i];
-    }
-    return NULL;
-}
-
-/**
- * Run a subprocess codec command, piping input to stdin and capturing stdout.
- * extra_keys/extra_values/extra_count: codec-specific --key value pairs to forward.
- * Returns malloc'd output buffer (caller must free), or NULL on error.
- */
-static char* run_subprocess_codec(const char* exe_path, const char* subcommand,
-                                  int editable,
-                                  const char** extra_keys, size_t* extra_key_lens,
-                                  const char** extra_values, size_t* extra_value_lens,
-                                  size_t extra_count,
-                                  const void* input, size_t input_len,
-                                  size_t* output_len) {
-    int stdin_pipe[2] = {-1, -1};
-    int stdout_pipe[2] = {-1, -1};
-
-    if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0) {
-        if (stdin_pipe[0] >= 0) { close(stdin_pipe[0]); close(stdin_pipe[1]); }
-        return NULL;
-    }
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(stdin_pipe[0]); close(stdin_pipe[1]);
-        close(stdout_pipe[0]); close(stdout_pipe[1]);
-        return NULL;
-    }
-
-    if (pid == 0) {
-        /* Child: wire up pipes, exec codec */
-        close(stdin_pipe[1]);
-        close(stdout_pipe[0]);
-        dup2(stdin_pipe[0], STDIN_FILENO);
-        dup2(stdout_pipe[1], STDOUT_FILENO);
-        close(stdin_pipe[0]);
-        close(stdout_pipe[1]);
-
-        /* Build argv: exe subcommand [--editable] [--key value ...] NULL */
-        /* Max args: exe + subcommand + --editable + 2*extra_count + NULL */
-        size_t max_args = 3 + 2 * extra_count + 1;
-        char** child_argv = malloc(max_args * sizeof(char*));
-        if (!child_argv) _exit(127);
-
-        size_t ai = 0;
-        child_argv[ai++] = (char*)exe_path;
-        child_argv[ai++] = (char*)subcommand;
-        if (editable) {
-            child_argv[ai++] = "--editable";
-        }
-        for (size_t i = 0; i < extra_count; i++) {
-            /* Build --key string (null-terminated) */
-            size_t klen = extra_key_lens[i];
-            char* flag = malloc(2 + klen + 1);
-            if (!flag) _exit(127);
-            flag[0] = '-'; flag[1] = '-';
-            memcpy(flag + 2, extra_keys[i], klen);
-            flag[2 + klen] = '\0';
-            child_argv[ai++] = flag;
-
-            /* Build value string (null-terminated) */
-            size_t vlen = extra_value_lens[i];
-            char* val = malloc(vlen + 1);
-            if (!val) _exit(127);
-            memcpy(val, extra_values[i], vlen);
-            val[vlen] = '\0';
-            child_argv[ai++] = val;
-        }
-        child_argv[ai] = NULL;
-
-        execv(exe_path, child_argv);
-        _exit(127);
-    }
-
-    /* Parent: write input, read output */
-    close(stdin_pipe[0]);
-    close(stdout_pipe[1]);
-
-    if (input && input_len > 0) {
-        size_t written = 0;
-        while (written < input_len) {
-            ssize_t n = write(stdin_pipe[1],
-                              (const char*)input + written,
-                              input_len - written);
-            if (n <= 0) break;
-            written += (size_t)n;
-        }
-    }
-    close(stdin_pipe[1]);
-
-    /* Read all output */
-    size_t capacity = INITIAL_BUFFER_SIZE;
-    size_t len = 0;
-    char* output = malloc(capacity);
-    if (!output) {
-        close(stdout_pipe[0]);
-        waitpid(pid, NULL, 0);
-        return NULL;
-    }
-
-    for (;;) {
-        if (len >= capacity) {
-            capacity *= 2;
-            char* new_buf = realloc(output, capacity);
-            if (!new_buf) {
-                free(output);
-                close(stdout_pipe[0]);
-                waitpid(pid, NULL, 0);
-                return NULL;
-            }
-            output = new_buf;
-        }
-        ssize_t n = read(stdout_pipe[0], output + len, capacity - len);
-        if (n <= 0) break;
-        len += (size_t)n;
-    }
-    close(stdout_pipe[0]);
-
-    int status;
-    waitpid(pid, &status, 0);
-
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        free(output);
-        return NULL;
-    }
-
-    *output_len = len;
-    return output;
-}
-
-#endif /* HAS_SUBPROCESS_CODECS */
 
 int main(int argc, char* argv[]) {
+    program_path = argv[0];
+
     /* No arguments or help flag */
     if (argc < 2 ||
         strcmp(argv[1], "-h") == 0 ||
@@ -354,6 +106,8 @@ static void print_usage(const char* program_name) {
     fprintf(stderr, "\n");
     fprintf(stderr, "Expand/Collapse options:\n");
     fprintf(stderr, "  --codec <name>      Use specific codec (default: auto-detect)\n");
+    fprintf(stderr, "  --KEY VALUE         Codec-specific option (see 'codecs <name>')\n");
+    fprintf(stderr, "  <file> may be - or @stdin to read standard input\n");
     fprintf(stderr, "  --editable          Editable mode (omit/recalculate derived fields)\n");
     fprintf(stderr, "  --compact           Compact output (no pretty-printing)\n");
     fprintf(stderr, "\n");
@@ -361,6 +115,10 @@ static void print_usage(const char* program_name) {
     fprintf(stderr, "  --as <type>         Interpret binary as type (u8..u64, i8..i64, f32, f64,\n");
     fprintf(stderr, "                      uuid, datetime-s/ms/ns, utf16le/be, hex, base64, bigint)\n");
     fprintf(stderr, "                      Append 'be' for big-endian (e.g., u32be, f64be)\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Codec plugins:\n");
+    fprintf(stderr, "  Codecs are c0-codec-<name> executables found in $C0_CODEC_PATH if set,\n");
+    fprintf(stderr, "  otherwise beside this executable, in ~/.c0/codecs, then on PATH.\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -h, --help          Show this help message\n");
@@ -573,434 +331,268 @@ static int cmd_decode(void) {
  * Expand command: read binary file, expand via codec to C0 text on stdout
  * Usage: c0 expand [--codec name] [--editable] [--compact] <file>
  */
-static int cmd_expand(int argc, char* argv[]) {
-    const char* codec_name = NULL;
-    size_t codec_name_len = 0;
-    int faithful = 1;
-    int pretty = 1; /* pretty-print by default */
-    const char* filepath = NULL;
+#define MAX_EXTRA_ARGS 32
 
-    /* Codec-specific extra args (unknown --flag value pairs) */
-    #define MAX_EXTRA_ARGS 32
+/* Options shared by expand and collapse; extras are codec-specific --KEY VALUE pairs. */
+typedef struct {
+    const char* codec_name;
+    int editable;
+    int compact;
+    const char* filepath;
     const char* extra_keys[MAX_EXTRA_ARGS];
-    size_t extra_key_lens[MAX_EXTRA_ARGS];
     const char* extra_values[MAX_EXTRA_ARGS];
-    size_t extra_value_lens[MAX_EXTRA_ARGS];
-    size_t extra_count = 0;
+    size_t extra_count;
+} CodecCommand;
 
-    /* Parse arguments after "expand" */
+/* Parses expand/collapse arguments; later duplicates of an option override earlier ones. */
+static int parse_codec_command(int argc, char* argv[], int allow_compact, CodecCommand* cmd) {
+    memset(cmd, 0, sizeof(*cmd));
+    int positional_only = 0;
     for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "--codec") == 0) {
+        const char* a = argv[i];
+        if (positional_only || strcmp(a, "-") == 0 || a[0] != '-') {
+            cmd->filepath = a;
+        } else if (strcmp(a, "--") == 0) {
+            positional_only = 1;
+        } else if (strcmp(a, "--codec") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "Error: --codec requires an argument\n");
-                return 1;
+                return 0;
             }
-            codec_name = argv[++i];
-            codec_name_len = strlen(codec_name);
-        } else if (strcmp(argv[i], "--editable") == 0) {
-            faithful = 0;
-        } else if (strcmp(argv[i], "--compact") == 0) {
-            pretty = 0;
-        } else if (strncmp(argv[i], "--", 2) == 0) {
-            /* Unknown --flag: treat as codec-specific arg */
+            cmd->codec_name = argv[++i];
+        } else if (strcmp(a, "--editable") == 0) {
+            cmd->editable = 1;
+        } else if (allow_compact && strcmp(a, "--compact") == 0) {
+            cmd->compact = 1;
+        } else if (strncmp(a, "--", 2) == 0) {
             if (i + 1 >= argc) {
-                fprintf(stderr, "Error: %s requires a value\n", argv[i]);
-                return 1;
+                fprintf(stderr, "Error: %s requires a value\n", a);
+                return 0;
             }
-            if (extra_count >= MAX_EXTRA_ARGS) {
-                fprintf(stderr, "Error: Too many extra arguments (max %d)\n", MAX_EXTRA_ARGS);
-                return 1;
+            size_t slot = cmd->extra_count;
+            for (size_t k = 0; k < cmd->extra_count; k++) {
+                if (strcmp(cmd->extra_keys[k], a + 2) == 0) slot = k;
             }
-            extra_keys[extra_count] = argv[i] + 2; /* skip "--" */
-            extra_key_lens[extra_count] = strlen(argv[i] + 2);
-            extra_values[extra_count] = argv[i + 1];
-            extra_value_lens[extra_count] = strlen(argv[i + 1]);
-            extra_count++;
-            i++; /* skip value */
-        } else if (argv[i][0] == '-') {
-            fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
-            return 1;
+            if (slot == MAX_EXTRA_ARGS) {
+                fprintf(stderr, "Error: Too many codec options (max %d)\n", MAX_EXTRA_ARGS);
+                return 0;
+            }
+            cmd->extra_keys[slot] = a + 2;
+            cmd->extra_values[slot] = argv[++i];
+            if (slot == cmd->extra_count) cmd->extra_count++;
         } else {
-            filepath = argv[i];
+            fprintf(stderr, "Error: Unknown option '%s'\n", a);
+            return 0;
         }
     }
+    return 1;
+}
 
-    if (!filepath) {
-        fprintf(stderr, "Error: expand requires a file argument\n");
-        fprintf(stderr, "Usage: c0 expand [--codec name] [--editable] <file>\n");
-        return 1;
+static int is_stdin_path(const char* path) {
+    return path == NULL || strcmp(path, "-") == 0 || strcmp(path, "@stdin") == 0;
+}
+
+/* Resolves a named codec plugin and loads its metadata, reporting failures. */
+static CodecPlugin* require_codec(const char* name) {
+    CodecPlugin* p = codec_host_find(name);
+    if (!p) {
+        fprintf(stderr, "Error: codec '%s' not found (see 'c0 codecs')\n", name);
+        return NULL;
     }
-
-    /* Read file */
-    size_t data_len;
-    char* data = read_file(filepath, &data_len);
-    if (!data) return 1;
-
-    /* Create arena */
-    C0Arena* arena = c0_arena_new();
-    if (!arena) {
-        fprintf(stderr, "Error: Failed to create arena\n");
-        free(data);
-        return 1;
+    if (!codec_host_load_info(p)) {
+        fprintf(stderr, "Error: codec '%s' is unusable: %s\n", name, p->info_error);
+        return NULL;
     }
+    return p;
+}
 
-    /* Expand via codec */
-    size_t c0_len;
-    uint8_t* c0_data = c0_codec_expand(arena,
-        codec_name, codec_name_len,
-        filepath, strlen(filepath),
-        (const uint8_t*)data, data_len,
-        faithful,
-        pretty,
-        extra_count > 0 ? extra_keys : NULL,
-        extra_count > 0 ? extra_key_lens : NULL,
-        extra_count > 0 ? extra_values : NULL,
-        extra_count > 0 ? extra_value_lens : NULL,
-        extra_count,
-        &c0_len);
-
-    if (!c0_data) {
-#if HAS_SUBPROCESS_CODECS
-        /* Try subprocess codec as fallback */
-        const SubprocessCodec* sub = NULL;
-        if (codec_name) {
-            sub = find_subprocess_codec(codec_name);
-        }
-        if (sub) {
-            size_t sub_out_len;
-            char* sub_out = run_subprocess_codec(sub->path, "expand",
-                                                 !faithful,
-                                                 extra_count > 0 ? extra_keys : NULL,
-                                                 extra_count > 0 ? extra_key_lens : NULL,
-                                                 extra_count > 0 ? extra_values : NULL,
-                                                 extra_count > 0 ? extra_value_lens : NULL,
-                                                 extra_count,
-                                                 data, data_len,
-                                                 &sub_out_len);
-            if (sub_out) {
-#ifdef _WIN32
-                _setmode(_fileno(stdout), _O_BINARY);
-#endif
-                size_t written = fwrite(sub_out, 1, sub_out_len, stdout);
-                free(sub_out);
-                c0_arena_free(arena);
-                free(data);
-                return (written == sub_out_len) ? 0 : 1;
-            }
-            fprintf(stderr, "Error: Subprocess codec '%s' failed to expand '%s'\n",
-                    codec_name, filepath);
-            c0_arena_free(arena);
-            free(data);
+/* Runs one plugin subcommand and writes its stdout to ours; returns the CLI exit status. */
+static int run_codec(CodecPlugin* p, const char* subcommand, const CodecCommand* cmd,
+                     const uint8_t* input, size_t input_len) {
+    for (size_t i = 0; i < cmd->extra_count; i++) {
+        if (codec_host_arg_index(p, cmd->extra_keys[i]) < 0) {
+            fprintf(stderr, "Error: codec '%s' has no option --%s (see 'c0 codecs %s')\n",
+                    p->name, cmd->extra_keys[i], p->name);
             return 1;
         }
-#endif
-        /* Give a helpful error */
-        const char* detected = c0_codec_detect(
-            (const uint8_t*)data, data_len,
-            filepath, strlen(filepath));
-        if (!detected) {
-            fprintf(stderr, "Error: No codec found for '%s' (unrecognized format)\n", filepath);
-        } else {
-            fprintf(stderr, "Error: Codec '%s' failed to expand '%s'\n", detected, filepath);
-        }
-        c0_arena_free(arena);
-        free(data);
-        return 1;
+    }
+    const char* args[3 + 2 * MAX_EXTRA_ARGS];
+    char flags[MAX_EXTRA_ARGS][80];
+    size_t n = 0;
+    args[n++] = subcommand;
+    if (cmd->editable) args[n++] = "--editable";
+    if (cmd->compact) args[n++] = "--compact";
+    for (size_t i = 0; i < cmd->extra_count; i++) {
+        snprintf(flags[i], sizeof(flags[i]), "--%s", cmd->extra_keys[i]);
+        args[n++] = flags[i];
+        args[n++] = cmd->extra_values[i];
     }
 
-    /* Write C0 to stdout */
+    uint8_t* out = NULL;
+    size_t out_len = 0;
+    int exit_code = 0;
+    if (codec_host_run(p->path, args, n, input, input_len, &out, &out_len, &exit_code) != 0) {
+        fprintf(stderr, "Error: could not run codec '%s' (%s)\n", p->name, p->path);
+        return 1;
+    }
+    if (exit_code != 0) {
+        free(out);
+        fprintf(stderr, "Error: codec '%s' failed (exit %d)\n", p->name, exit_code);
+        return 1;
+    }
 #ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
-    size_t written = fwrite(c0_data, 1, c0_len, stdout);
-    if (written != c0_len) {
+    int ok = out_len == 0 || fwrite(out, 1, out_len, stdout) == out_len;
+    free(out);
+    if (!ok || fflush(stdout) != 0) {
         fprintf(stderr, "Error: Failed to write output\n");
-        c0_arena_free(arena);
-        free(data);
         return 1;
     }
-
-    c0_arena_free(arena);
-    free(data);
     return 0;
 }
 
 /**
- * Collapse command: read C0 text, collapse to native format on stdout
- * Usage: c0 collapse [--codec name] [--editable] [<file>]
- * If no file given, reads from stdin.
+ * Expand command: native file -> C0 text on stdout, through a codec plugin
+ * Usage: c0 expand [--codec name] [--editable] [--compact] [--KEY VALUE]... <file|-|@stdin>
  */
-static int cmd_collapse(int argc, char* argv[]) {
-    const char* codec_name = NULL;
-    size_t codec_name_len = 0;
-    int faithful = 1;
-    const char* filepath = NULL;
+static int cmd_expand(int argc, char* argv[]) {
+    CodecCommand cmd;
+    if (!parse_codec_command(argc, argv, 1, &cmd)) return 1;
+    if (!cmd.filepath) {
+        fprintf(stderr, "Error: expand requires a file argument (use - for stdin)\n");
+        fprintf(stderr, "Usage: c0 expand [--codec name] [--editable] [--compact] <file>\n");
+        return 1;
+    }
+    size_t data_len;
+    char* data = is_stdin_path(cmd.filepath) ? read_stdin(&data_len) : read_file(cmd.filepath, &data_len);
+    if (!data) return 1;
 
-    /* Codec-specific extra args (unknown --flag value pairs) */
-    const char* extra_keys[MAX_EXTRA_ARGS];
-    size_t extra_key_lens[MAX_EXTRA_ARGS];
-    const char* extra_values[MAX_EXTRA_ARGS];
-    size_t extra_value_lens[MAX_EXTRA_ARGS];
-    size_t extra_count = 0;
+    codec_host_discover(program_path);
+    CodecPlugin* p;
+    if (cmd.codec_name) {
+        p = require_codec(cmd.codec_name);
+    } else {
+        p = codec_host_detect((const uint8_t*)data, data_len, is_stdin_path(cmd.filepath) ? NULL : cmd.filepath);
+        if (!p) fprintf(stderr, "Error: No codec found for '%s' (unrecognized format; see 'c0 codecs')\n", cmd.filepath);
+    }
+    int rc = p ? run_codec(p, "expand", &cmd, (const uint8_t*)data, data_len) : 1;
+    free(data);
+    return rc;
+}
 
-    /* Parse arguments after "collapse" */
-    for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "--codec") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "Error: --codec requires an argument\n");
-                return 1;
+/* Finds the plugin named by a C0 document's top-level `format` field. */
+static CodecPlugin* codec_for_document(const char* data, size_t len) {
+    C0Arena* arena = c0_arena_new();
+    if (!arena) {
+        fprintf(stderr, "Error: Failed to create arena\n");
+        return NULL;
+    }
+    CodecPlugin* found = NULL;
+    C0Value* doc = c0_decode(arena, (const uint8_t*)data, len);
+    if (!doc) {
+        fprintf(stderr, "Error: Input is not valid C0\n");
+    } else {
+        const char* format = NULL;
+        size_t format_len = 0;
+        if (c0_is_object(doc)) {
+            for (size_t i = 0; i < c0_object_len(doc); i++) {
+                size_t key_len;
+                const char* key = c0_object_key(doc, i, &key_len);
+                C0Value* v = c0_object_value(doc, i);
+                if (key_len == 6 && memcmp(key, "format", 6) == 0 && c0_is_string(v)) {
+                    format = c0_string_data(v, &format_len);
+                    break;
+                }
             }
-            codec_name = argv[++i];
-            codec_name_len = strlen(codec_name);
-        } else if (strcmp(argv[i], "--editable") == 0) {
-            faithful = 0;
-        } else if (strncmp(argv[i], "--", 2) == 0) {
-            /* Unknown --flag: treat as codec-specific arg */
-            if (i + 1 >= argc) {
-                fprintf(stderr, "Error: %s requires a value\n", argv[i]);
-                return 1;
-            }
-            if (extra_count >= MAX_EXTRA_ARGS) {
-                fprintf(stderr, "Error: Too many extra arguments (max %d)\n", MAX_EXTRA_ARGS);
-                return 1;
-            }
-            extra_keys[extra_count] = argv[i] + 2; /* skip "--" */
-            extra_key_lens[extra_count] = strlen(argv[i] + 2);
-            extra_values[extra_count] = argv[i + 1];
-            extra_value_lens[extra_count] = strlen(argv[i + 1]);
-            extra_count++;
-            i++; /* skip value */
-        } else if (argv[i][0] == '-') {
-            fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
-            return 1;
+        }
+        if (!format) {
+            fprintf(stderr, "Error: C0 input has no top-level 'format' field; use --codec\n");
         } else {
-            filepath = argv[i];
+            found = codec_host_find_format((const uint8_t*)format, format_len);
+            if (!found) fprintf(stderr, "Error: No codec handles format '%.*s' (see 'c0 codecs')\n", (int)format_len, format);
         }
     }
+    c0_arena_free(arena);
+    return found;
+}
 
-    /* Read C0 data from file or stdin */
+/**
+ * Collapse command: C0 text -> native bytes on stdout, through a codec plugin
+ * Usage: c0 collapse [--codec name] [--editable] [--KEY VALUE]... [file|-|@stdin]
+ * Without --codec, the document's top-level `format` field selects the codec.
+ */
+static int cmd_collapse(int argc, char* argv[]) {
+    CodecCommand cmd;
+    if (!parse_codec_command(argc, argv, 0, &cmd)) return 1;
     size_t c0_len;
-    char* c0_data;
-    if (filepath) {
-        c0_data = read_file(filepath, &c0_len);
-    } else {
-        c0_data = read_stdin(&c0_len);
-    }
+    char* c0_data = is_stdin_path(cmd.filepath) ? read_stdin(&c0_len) : read_file(cmd.filepath, &c0_len);
     if (!c0_data) return 1;
-
     if (c0_len == 0) {
         fprintf(stderr, "Error: Empty input\n");
         free(c0_data);
         return 1;
     }
-
-    /* Create arena */
-    C0Arena* arena = c0_arena_new();
-    if (!arena) {
-        fprintf(stderr, "Error: Failed to create arena\n");
-        free(c0_data);
-        return 1;
-    }
-
-    /* Collapse via codec */
-    size_t out_len;
-    uint8_t* native_data = c0_codec_collapse(arena,
-        codec_name, codec_name_len,
-        (const uint8_t*)c0_data, c0_len,
-        faithful,
-        extra_count > 0 ? extra_keys : NULL,
-        extra_count > 0 ? extra_key_lens : NULL,
-        extra_count > 0 ? extra_values : NULL,
-        extra_count > 0 ? extra_value_lens : NULL,
-        extra_count,
-        &out_len);
-
-    if (!native_data) {
-#if HAS_SUBPROCESS_CODECS
-        /* Try subprocess codec as fallback */
-        const SubprocessCodec* sub = NULL;
-        if (codec_name) {
-            sub = find_subprocess_codec(codec_name);
-        } else {
-            /* Try to infer codec name from C0 "format" field.
-             * Decode C0, look for {format:<name>,...} */
-            C0Value* val = c0_decode(arena, (const uint8_t*)c0_data, c0_len);
-            if (val && c0_is_object(val)) {
-                size_t obj_len = c0_object_len(val);
-                for (size_t i = 0; i < obj_len; i++) {
-                    size_t key_len;
-                    const char* key = c0_object_key(val, i, &key_len);
-                    if (key_len == 6 && memcmp(key, "format", 6) == 0) {
-                        C0Value* fval = c0_object_value(val, i);
-                        if (fval && c0_is_string(fval)) {
-                            size_t fname_len;
-                            const char* fname = c0_string_data(fval, &fname_len);
-                            /* Use a null-terminated copy for lookup */
-                            char fname_buf[256];
-                            if (fname_len < sizeof(fname_buf)) {
-                                memcpy(fname_buf, fname, fname_len);
-                                fname_buf[fname_len] = '\0';
-                                sub = find_subprocess_codec(fname_buf);
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        if (sub) {
-            size_t sub_out_len;
-            char* sub_out = run_subprocess_codec(sub->path, "collapse",
-                                                 !faithful,
-                                                 extra_count > 0 ? extra_keys : NULL,
-                                                 extra_count > 0 ? extra_key_lens : NULL,
-                                                 extra_count > 0 ? extra_values : NULL,
-                                                 extra_count > 0 ? extra_value_lens : NULL,
-                                                 extra_count,
-                                                 c0_data, c0_len,
-                                                 &sub_out_len);
-            if (sub_out) {
-#ifdef _WIN32
-                _setmode(_fileno(stdout), _O_BINARY);
-#endif
-                size_t written = fwrite(sub_out, 1, sub_out_len, stdout);
-                free(sub_out);
-                c0_arena_free(arena);
-                free(c0_data);
-                return (written == sub_out_len) ? 0 : 1;
-            }
-            fprintf(stderr, "Error: Subprocess codec '%s' failed to collapse data\n",
-                    sub->name);
-            c0_arena_free(arena);
-            free(c0_data);
-            return 1;
-        }
-#endif
-        fprintf(stderr, "Error: Failed to collapse C0 data (codec not found or invalid data)\n");
-        c0_arena_free(arena);
-        free(c0_data);
-        return 1;
-    }
-
-    /* Write native bytes to stdout */
-#ifdef _WIN32
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
-    size_t written = fwrite(native_data, 1, out_len, stdout);
-    if (written != out_len) {
-        fprintf(stderr, "Error: Failed to write output\n");
-        c0_arena_free(arena);
-        free(c0_data);
-        return 1;
-    }
-
-    c0_arena_free(arena);
+    codec_host_discover(program_path);
+    CodecPlugin* p = cmd.codec_name ? require_codec(cmd.codec_name) : codec_for_document(c0_data, c0_len);
+    int rc = p ? run_codec(p, "collapse", &cmd, (const uint8_t*)c0_data, c0_len) : 1;
     free(c0_data);
-    return 0;
+    return rc;
+}
+
+static void print_modes(const CodecPlugin* p) {
+    if (p->faithful && p->editable) printf("  [faithful, editable]");
+    else if (p->faithful) printf("  [faithful]");
+    else if (p->editable) printf("  [editable]");
 }
 
 /**
- * Codecs command: list available codecs or show per-codec help
+ * Codecs command: list codec plugins or show one plugin's help
  * Usage: c0 codecs [name]
  */
 static int cmd_codecs(int argc, char* argv[]) {
-    size_t count = c0_codec_count();
-
-    /* If a codec name is given, show detailed help for that codec */
+    codec_host_discover(program_path);
     if (argc > 2) {
-        const char* name = argv[2];
-        size_t name_len = strlen(name);
-
-        /* Create arena for custom_args */
-        C0Arena* arena = c0_arena_new();
-
-        for (size_t i = 0; i < count; i++) {
-            C0CodecInfo info = c0_codec_info(arena, i);
-            if (info.name_len == name_len &&
-                memcmp(info.name, name, name_len) == 0) {
-                /* Found it — print detailed help */
-                printf("%.*s", (int)info.name_len, info.name);
-
-                /* Modes */
-                if (info.supports_faithful && info.supports_editable) {
-                    printf("  [faithful, editable]");
-                } else if (info.supports_faithful) {
-                    printf("  [faithful]");
-                } else if (info.supports_editable) {
-                    printf("  [editable]");
-                }
-                printf("\n");
-
-                printf("  %.*s\n", (int)info.description_len, info.description);
-
-                /* Custom args */
-                if (info.custom_args_count > 0) {
-                    printf("\nOptions:\n");
-                    for (size_t j = 0; j < info.custom_args_count; j++) {
-                        const C0CodecArg* arg = &info.custom_args[j];
-                        printf("  --%.*s %.*s",
-                            (int)arg->name_len, arg->name,
-                            (int)arg->value_name_len, arg->value_name);
-                        /* Pad to align descriptions */
-                        int used = 4 + (int)arg->name_len + 1 + (int)arg->value_name_len;
-                        int pad = 20 - used;
-                        if (pad < 2) pad = 2;
-                        for (int p = 0; p < pad; p++) putchar(' ');
-                        printf("%.*s\n",
-                            (int)arg->description_len, arg->description);
-                    }
-                }
-
-                /* Detailed help text */
-                if (info.help_len > 0) {
-                    printf("\n%.*s\n", (int)info.help_len, info.help);
-                }
-
-                if (arena) c0_arena_free(arena);
-                return 0;
+        CodecPlugin* p = codec_host_find(argv[2]);
+        if (!p) {
+            fprintf(stderr, "Error: Unknown codec '%s'\n", argv[2]);
+            return 1;
+        }
+        if (!codec_host_load_info(p)) {
+            fprintf(stderr, "Error: codec '%s' is unusable: %s\n", p->name, p->info_error);
+            return 1;
+        }
+        printf("%s", p->name);
+        print_modes(p);
+        printf("\n  %s\n  %s\n", p->description, p->path);
+        if (p->args_len > 0) {
+            printf("\nOptions:\n");
+            for (size_t j = 0; j < p->args_len; j++) {
+                int used = printf("  --%s %s", p->args[j].name, p->args[j].value_name);
+                for (int pad = 22 - used; pad > 0; pad--) putchar(' ');
+                printf("  %s\n", p->args[j].description);
             }
         }
-
-        if (arena) c0_arena_free(arena);
-        fprintf(stderr, "Error: Unknown codec '%s'\n", name);
-        return 1;
+        if (p->help[0]) printf("\n%s\n", p->help);
+        return 0;
     }
 
-    /* No name given — list all codecs */
-    printf("Built-in codecs:\n\n");
-    if (count == 0) {
-        printf("  (none)\n");
-    }
-    for (size_t i = 0; i < count; i++) {
-        C0CodecInfo info = c0_codec_info(NULL, i);
-        printf("  %.*s", (int)info.name_len, info.name);
-
-        /* Modes */
-        if (info.supports_faithful && info.supports_editable) {
-            printf("  [faithful, editable]");
-        } else if (info.supports_faithful) {
-            printf("  [faithful]");
-        } else if (info.supports_editable) {
-            printf("  [editable]");
+    printf("Codec plugins:\n\n");
+    if (codec_host_count() == 0) printf("  (none)\n");
+    for (size_t i = 0; i < codec_host_count(); i++) {
+        CodecPlugin* p = codec_host_get(i);
+        printf("  %s", p->name);
+        if (codec_host_load_info(p)) {
+            print_modes(p);
+            printf("\n    %s\n", p->description);
+        } else {
+            printf("  (unavailable: %s)\n", p->info_error);
         }
-
-        printf("\n");
-        printf("    %.*s\n", (int)info.description_len, info.description);
+        printf("    %s\n", p->path);
     }
-
-#if HAS_SUBPROCESS_CODECS
-    discover_subprocess_codecs();
-    if (subprocess_codec_count > 0) {
-        printf("\nExternal codecs (subprocess):\n\n");
-        for (size_t i = 0; i < subprocess_codec_count; i++) {
-            printf("  %s\n", subprocess_codecs[i].name);
-            printf("    %s\n", subprocess_codecs[i].path);
-        }
-    }
-#endif
-
     return 0;
 }
+
 
 /**
  * to-json command: convert C0 text to JSON (naive, all strings as JSON strings)

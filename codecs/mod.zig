@@ -1,4 +1,7 @@
-//! C0 Codec System - Runtime-polymorphic codec interface
+//! C0 Codec System - shared codec interface and metadata helpers
+//!
+//! Each codec ships as a separate c0-codec-<name> plugin executable (protocol c0-codec/1,
+//! docs/plan_context/codec_plugins.md); codecs/plugin.zig adapts a codec type to the plugin ABI.
 //!
 //! Codecs transform binary file formats to/from C0 structured text.
 //! "expand" converts native binary to C0 (human-readable, editable).
@@ -141,178 +144,69 @@ pub const Codec = struct {
     }
 };
 
-/// Registry of available codecs
-pub const Registry = struct {
-    codecs: []const Codec,
-
-    /// Find a codec by name
-    pub fn findByName(self: Registry, name: []const u8) ?Codec {
-        for (self.codecs) |codec| {
-            if (std.mem.eql(u8, codec.info().name, name)) return codec;
-        }
-        return null;
+/// True when `data` carries one of the codec's magic byte patterns at its offset.
+pub fn magicMatches(info: CodecInfo, data: []const u8) bool {
+    for (info.magic) |m| {
+        if (data.len >= m.offset + m.bytes.len and std.mem.eql(u8, data[m.offset..][0..m.bytes.len], m.bytes)) return true;
     }
+    return false;
+}
 
-    /// Find a codec by file extension (including the dot)
-    pub fn findByExtension(self: Registry, ext: []const u8) ?Codec {
-        for (self.codecs) |codec| {
-            for (codec.info().extensions) |supported_ext| {
-                if (std.ascii.eqlIgnoreCase(ext, supported_ext)) return codec;
-            }
-        }
-        return null;
-    }
-
-    /// Auto-detect codec from file content and optional filename
-    pub fn detect(self: Registry, filename: ?[]const u8, data: []const u8) ?Codec {
-        // First try magic bytes (most reliable)
-        for (self.codecs) |codec| {
-            for (codec.info().magic) |magic| {
-                if (data.len >= magic.offset + magic.bytes.len) {
-                    if (std.mem.eql(u8, data[magic.offset..][0..magic.bytes.len], magic.bytes)) {
-                        return codec;
-                    }
-                }
-            }
-        }
-
-        // Fall back to extension matching
-        if (filename) |name| {
-            const ext = std.fs.path.extension(name);
-            if (ext.len > 0) {
-                return self.findByExtension(ext);
-            }
-        }
-
-        return null;
-    }
-
-    /// Infer codec from a C0 Value's "format" field
-    pub fn findByFormatField(self: Registry, value: Value) ?Codec {
-        switch (value) {
-            .object => |entries| {
-                for (entries) |entry| {
-                    if (std.mem.eql(u8, entry.key, "format")) {
-                        switch (entry.value) {
-                            .string => |format_name| {
-                                // Check format_names first, then fall back to codec name
-                                for (self.codecs) |codec| {
-                                    const info = codec.info();
-                                    for (info.format_names) |fn_name| {
-                                        if (std.mem.eql(u8, fn_name, format_name)) return codec;
-                                    }
-                                    if (std.mem.eql(u8, info.name, format_name)) return codec;
-                                }
-                                return null;
-                            },
-                            else => return null,
-                        }
-                    }
-                }
-            },
-            else => {},
-        }
-        return null;
-    }
-};
-
-/// Built-in codec registry
-var png_instance = png.PngCodec{};
-var bg3_instance = bg3.Bg3Codec{};
-var json_instance = json.JsonCodec{};
-var jpeg_instance = exif.JpegCodec{};
-var tiff_instance = exif.TiffCodec{};
-var pdf_instance = pdf.PdfCodec{};
-
-pub const builtin_codecs = [_]Codec{
-    Codec.init(&png_instance),
-    Codec.init(&bg3_instance),
-    Codec.init(&json_instance),
-    Codec.init(&jpeg_instance),
-    Codec.init(&tiff_instance),
-    Codec.init(&pdf_instance),
-};
-
-pub const builtin_registry = Registry{
-    .codecs = &builtin_codecs,
-};
+/// True when the codec claims the file extension (with dot), compared case-insensitively.
+pub fn claimsExtension(info: CodecInfo, ext: []const u8) bool {
+    for (info.extensions) |e| if (std.ascii.eqlIgnoreCase(e, ext)) return true;
+    return false;
+}
 
 // ============================================================================
 // Tests
 // ============================================================================
+//
+// Codec selection now happens in the c0 CLI's plugin host (cli/codec_host.c, covered by
+// tests/cli/test_codecs.sh). These tests check that each codec's metadata makes the claims the
+// host relies on.
 
-test "registry finds PNG codec by name" {
-    const codec = builtin_registry.findByName("png");
-    try std.testing.expect(codec != null);
-    try std.testing.expectEqualStrings("png", codec.?.info().name);
+fn infoOf(comptime T: type) CodecInfo {
+    var instance = T{};
+    return instance.getInfo();
 }
 
-test "registry finds PNG codec by extension" {
-    const codec = builtin_registry.findByExtension(".png");
-    try std.testing.expect(codec != null);
-    try std.testing.expectEqualStrings("png", codec.?.info().name);
+test "png metadata claims the PNG signature and .png" {
+    const info = infoOf(png.PngCodec);
+    try std.testing.expectEqualStrings("png", info.name);
+    try std.testing.expect(magicMatches(info, "\x89PNG\r\n\x1a\n" ++ "extra data"));
+    try std.testing.expect(claimsExtension(info, ".PNG"));
 }
 
-test "registry returns null for unknown codec" {
-    try std.testing.expect(builtin_registry.findByName("nonexistent") == null);
-    try std.testing.expect(builtin_registry.findByExtension(".xyz") == null);
+test "jpeg metadata claims the SOI marker and .jpg" {
+    const info = infoOf(exif.JpegCodec);
+    try std.testing.expectEqualStrings("jpeg", info.name);
+    try std.testing.expect(magicMatches(info, "\xFF\xD8\xFF\xE0extra"));
+    try std.testing.expect(claimsExtension(info, ".jpg"));
 }
 
-test "registry detects PNG from magic bytes" {
-    const png_sig = "\x89PNG\r\n\x1a\n" ++ "extra data";
-    const codec = builtin_registry.detect(null, png_sig);
-    try std.testing.expect(codec != null);
-    try std.testing.expectEqualStrings("png", codec.?.info().name);
+test "tiff metadata claims both byte orders" {
+    const info = infoOf(exif.TiffCodec);
+    try std.testing.expectEqualStrings("tiff", info.name);
+    try std.testing.expect(magicMatches(info, "II\x2a\x00extra"));
+    try std.testing.expect(magicMatches(info, "MM\x00\x2aextra"));
 }
 
-test "registry detects PNG from filename extension" {
-    const codec = builtin_registry.detect("image.png", "not png data");
-    try std.testing.expect(codec != null);
-    try std.testing.expectEqualStrings("png", codec.?.info().name);
+test "no codec claims unrecognized data, and short input never matches" {
+    inline for (.{ png.PngCodec, bg3.Bg3Codec, json.JsonCodec, exif.JpegCodec, exif.TiffCodec, pdf.PdfCodec }) |T| {
+        const info = infoOf(T);
+        try std.testing.expect(!magicMatches(info, "random data"));
+        try std.testing.expect(!magicMatches(info, ""));
+        try std.testing.expect(!claimsExtension(info, ".xyz"));
+    }
 }
 
-test "registry returns null for unrecognized data" {
-    const codec = builtin_registry.detect(null, "random data");
-    try std.testing.expect(codec == null);
-}
-
-test "registry finds JPEG codec by name" {
-    const c = builtin_registry.findByName("jpeg");
-    try std.testing.expect(c != null);
-    try std.testing.expectEqualStrings("jpeg", c.?.info().name);
-}
-
-test "registry finds JPEG codec by extension" {
-    const c = builtin_registry.findByExtension(".jpg");
-    try std.testing.expect(c != null);
-    try std.testing.expectEqualStrings("jpeg", c.?.info().name);
-}
-
-test "registry detects JPEG from magic bytes" {
-    const jpeg_sig = "\xFF\xD8\xFF\xE0extra";
-    const c = builtin_registry.detect(null, jpeg_sig);
-    try std.testing.expect(c != null);
-    try std.testing.expectEqualStrings("jpeg", c.?.info().name);
-}
-
-test "registry finds TIFF codec by name" {
-    const c = builtin_registry.findByName("tiff");
-    try std.testing.expect(c != null);
-    try std.testing.expectEqualStrings("tiff", c.?.info().name);
-}
-
-test "registry detects TIFF LE from magic bytes" {
-    const tiff_sig = "II\x2a\x00extra";
-    const c = builtin_registry.detect(null, tiff_sig);
-    try std.testing.expect(c != null);
-    try std.testing.expectEqualStrings("tiff", c.?.info().name);
-}
-
-test "registry detects TIFF BE from magic bytes" {
-    const tiff_sig = "MM\x00\x2aextra";
-    const c = builtin_registry.detect(null, tiff_sig);
-    try std.testing.expect(c != null);
-    try std.testing.expectEqualStrings("tiff", c.?.info().name);
+test "codec names are unique and safe as plugin executable names" {
+    const infos = [_]CodecInfo{ infoOf(png.PngCodec), infoOf(bg3.Bg3Codec), infoOf(json.JsonCodec), infoOf(exif.JpegCodec), infoOf(exif.TiffCodec), infoOf(pdf.PdfCodec) };
+    for (infos, 0..) |a, i| {
+        for (a.name) |c| try std.testing.expect(std.ascii.isAlphanumeric(c) or c == '-' or c == '_');
+        for (infos[i + 1 ..]) |b| try std.testing.expect(!std.mem.eql(u8, a.name, b.name));
+    }
 }
 
 test {
