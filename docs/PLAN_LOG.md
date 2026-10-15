@@ -17,3 +17,4 @@ Completed PLAN.md items retired by plan-retire, oldest retirement first.
 - [x] [Recently completed] JSON subset <-> C0 demo `examples/json_demo.zig` (done 2026-02-02, b731915)
 - [x] [Recently completed] C CLI (done 2026-02-02)
 - [x] [Recently completed] CLI bash tests (done 2026-02-02)
+- [x] [Recently completed] Documentation (done 2026-02-02)

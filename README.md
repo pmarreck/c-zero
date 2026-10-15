@@ -90,9 +90,16 @@ nix develop -c zig build -Doptimize=ReleaseFast
 ## Testing
 
 ```bash
-# Run all tests (Zig unit tests + CLI bash tests)
+# Run all tests: Zig unit tests, CLI and codec plugin tests, performance gates,
+# and a Windows smoke test of the plugin host under Wine
 ./test
+
+# On demand: the same Windows checks on a real Windows machine reachable over SSH
+# (OpenSSH server with key login); runs through cmd.exe in a path containing spaces
+nix develop -c tests/windows/remote-smoke HOST
 ```
+
+`./test` reports the Wine check as not run, and fails, on machines without Wine.
 
 ## Architecture
 

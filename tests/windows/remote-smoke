@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Real-Windows plugin-host smoke test over SSH. Cross-builds c0 and the codec plugins for
+# x86_64-windows, copies them with test inputs into a scratch directory whose path contains spaces
+# on the Windows host, runs them through cmd.exe (binary-safe redirection), and compares SHA-256
+# digests with the native build. Complements tests/windows/smoke (Wine), which runs in ./test; this
+# one needs a reachable Windows machine, so it is an on-demand check.
+# Usage: tests/windows/remote-smoke HOST   (from the dev shell, after the native ReleaseFast build)
+#   HOST  SSH destination of a Windows machine with OpenSSH server and passwordless key login
+set -u
+host=${1:?usage: tests/windows/remote-smoke HOST}
+root=$(cd -- "$(dirname -- "$0")/../.." && pwd)
+native="$root/zig-out/bin/c0"
+[[ -x $native ]] || { printf 'build the native c0 first (zig build -Doptimize=ReleaseFast)\n' >&2; exit 1; }
+failures=0
+fail() { failures=$((failures+1)); printf 'FAIL: %s\n' "$*" >&2; }
+check() { if [[ "${2-}" == "${3-}" ]]; then printf 'ok   %s\n' "$1"; else fail "$1: expected [${2-}], got [${3-}]"; fi; }
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/c0-remote-smoke.XXXXXX") || exit 1
+trap 'rm -rf -- "$scratch"' EXIT
+ssh_win() { ssh -o BatchMode=yes -o ConnectTimeout=15 -o LogLevel=ERROR "$host" "$@"; }
+
+cache="${ZIG_GLOBAL_CACHE_DIR:-$HOME/.cache/zig}"
+(cd "$root" && zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseFast --prefix "$scratch/win" --global-cache-dir "$cache") \
+	|| { printf 'FAIL: Windows cross-build\n' >&2; exit 1; }
+
+bundle="$scratch/bundle"
+mkdir -p "$bundle/bin" "$bundle/in"
+cp "$scratch/win/bin/c0.exe" "$bundle/bin/"
+for codec in png bg3 json jpeg tiff pdf; do cp "$scratch/win/bin/c0-codec-$codec.exe" "$bundle/bin/"; done
+printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x00\x00\x00\x00\x3a\x7e\x9b\x55\x00\x00\x00\x0aIDATx\x9cc\x60\x00\x00\x00\x02\x00\x01\x48\xaf\xa4\x71\x00\x00\x00\x00IEND\xaeB`\x82' >"$bundle/in/one.png"
+cp "$root/tests/fixtures/bg3_save.lsv" "$bundle/in/bg3_save.lsv"
+printf '{"a":' >"$bundle/in/bad.json"
+mkdir -p "$bundle/empty"
+
+# Expected digests from the native build.
+nexp() { C0_CODEC_PATH="$root/zig-out/bin" "$native" "$@"; }
+want_png_c0=$(nexp expand --editable "$bundle/in/one.png" | sha256sum | cut -d' ' -f1)
+want_png=$(sha256sum <"$bundle/in/one.png" | cut -d' ' -f1)
+want_bg3_c0=$(nexp expand "$bundle/in/bg3_save.lsv" | sha256sum | cut -d' ' -f1)
+
+id=$(date +%s)-$$
+rdir="%TEMP%\\c0 smoke $id"
+ssh_win "mkdir \"$rdir\"" || { printf 'FAIL: cannot create remote scratch directory\n' >&2; exit 1; }
+(cd "$bundle" && tar -cf - bin in empty) | ssh_win "tar -xf - -C \"$rdir\"" || fail "copy bundle to $host"
+# Runs one cmd.exe line inside the remote scratch directory; prints its stdout.
+rcmd() { ssh_win "cd /d \"$rdir\" && $1"; }
+# SHA-256 of a remote file, lowercase hex.
+rsha() { rcmd "certutil -hashfile \"$1\" SHA256" | sed -n 2p | tr -d ' \r' | tr 'A-F' 'a-f'; }
+
+listing=$(rcmd "bin\\c0.exe codecs" | tr -d '\r')
+for codec in png bg3 json jpeg tiff pdf; do
+	[[ $listing == *"  $codec  ["* ]] && printf 'ok   lists bundled %s\n' "$codec" || fail "windows lists bundled $codec"
+done
+[[ $listing == *"c0 smoke $id\\bin\\c0-codec-png.exe"* ]] && printf 'ok   bundled directory path with spaces\n' || fail "bundled path with spaces: $listing"
+
+rcmd "bin\\c0.exe expand --editable in\\one.png > png.c0" && check "png expand matches native" "$want_png_c0" "$(rsha png.c0)"
+rcmd "bin\\c0.exe collapse --editable png.c0 > one.out.png" && check "png editable round trip" "$want_png" "$(rsha one.out.png)"
+rcmd "bin\\c0.exe expand --editable --codec png - < in\\one.png > stdin.c0" && check "expand from stdin (-) via cmd redirection" "$want_png_c0" "$(rsha stdin.c0)"
+rcmd "bin\\c0.exe collapse --editable @stdin < png.c0 > stdin.png" && check "collapse from @stdin" "$want_png" "$(rsha stdin.png)"
+rcmd "bin\\c0.exe expand in\\bg3_save.lsv > bg3.c0" && check "bg3 expand (17 MB in, 77 MB out through pipes) matches native" "$want_bg3_c0" "$(rsha bg3.c0)"
+
+out=$(rcmd "bin\\c0.exe expand in\\bad.json 2>&1 & call echo exit=%^errorlevel%" | tr -d '\r')
+[[ $out == *"codec 'json' failed (exit 1)"* ]] && printf 'ok   plugin failure message\n' || fail "plugin failure message: $out"
+[[ $out == *"exit=1"* ]] && printf 'ok   plugin failure exit status\n' || fail "plugin failure exit status: $out"
+
+out=$(rcmd "set \"C0_CODEC_PATH=empty;bin\" && bin\\c0.exe codecs" | tr -d '\r')
+[[ $out == *"  png  ["* ]] && printf 'ok   C0_CODEC_PATH with ; separator\n' || fail "C0_CODEC_PATH list: $out"
+out=$(rcmd "set \"C0_CODEC_PATH=empty\" && bin\\c0.exe codecs" | tr -d '\r')
+[[ $out == *"(none)"* ]] && printf 'ok   C0_CODEC_PATH replaces the search list\n' || fail "C0_CODEC_PATH exclusive: $out"
+
+ssh_win "rmdir /s /q \"$rdir\"" || printf 'note: remote scratch %s left on %s\n' "$rdir" "$host" >&2
+if [[ $failures -eq 0 ]]; then printf 'Windows remote smoke test on %s: all checks passed\n' "$host"; else printf 'Windows remote smoke test: %d failures\n' "$failures" >&2; exit 1; fi

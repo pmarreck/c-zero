@@ -14,6 +14,7 @@ Completed items retire to `docs/PLAN_LOG.md`. Spec: `SPECIFICATION.md`.
 	- [x] CLI host: cross-platform discovery (C0_CODEC_PATH, bundled dir, ~/.c0/codecs, PATH), info parsing, detection, deadlock-free spawning (done 2026-10-15 14:50 EDT)
 	- [x] Remove codec exports and C dependencies from libc0 and the FFI (done 2026-10-15 14:50 EDT)
 	- [x] Windows: plugin discovery and CreateProcess spawning; cross-compiles for five targets; Wine smoke test in ./test (done 2026-10-15 14:50 EDT)
+	- [x] Real Windows 10 22H2 run of the plugin host over SSH: 16 checks pass (tests/windows/remote-smoke) (done 2026-10-15 18:45 EDT)
 	- [ ] Decide whether ./test should fail or pass with a notice on hosts without Wine (aarch64 macOS has no Nix Wine) (blocked: owner decision)
 	- [x] Verify the Nix package installs the plugin executables beside c0; sandboxed test check passes (done 2026-10-15 15:05 EDT)
 - [ ] Resolve smart-encoding data loss per owner decision c0-smart-encoding-roundtrip: raw glyph-only text (e.g. a lone `§`) decodes to different bytes, contradicting SPECIFICATION.md §12 (blocked: owner decision pending) (context: docs/plan_context/smart_encoding_defect.md)
@@ -29,4 +30,3 @@ Completed items retire to `docs/PLAN_LOG.md`. Spec: `SPECIFICATION.md`.
 
 ## Recently completed
 - [x] Empty-string ambiguity accepted as a documented limitation, SPECIFICATION.md §8 (done 2026-02-10, 27d19cc)
-- [x] Documentation (done 2026-02-02)
