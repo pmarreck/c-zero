@@ -15,7 +15,7 @@ Completed items retire to `docs/PLAN_LOG.md`. Spec: `SPECIFICATION.md`.
 	- [x] Remove codec exports and C dependencies from libc0 and the FFI (done 2026-10-15 14:50 EDT)
 	- [x] Windows: plugin discovery and CreateProcess spawning; cross-compiles for five targets; Wine smoke test in ./test (done 2026-10-15 14:50 EDT)
 	- [ ] Decide whether ./test should fail or pass with a notice on hosts without Wine (aarch64 macOS has no Nix Wine) (blocked: owner decision)
-	- [ ] Verify the Nix package installs the plugin executables beside c0 (README and dirtree notes updated)
+	- [x] Verify the Nix package installs the plugin executables beside c0; sandboxed test check passes (done 2026-10-15 15:05 EDT)
 - [ ] Resolve smart-encoding data loss per owner decision c0-smart-encoding-roundtrip: raw glyph-only text (e.g. a lone `§`) decodes to different bytes, contradicting SPECIFICATION.md §12 (blocked: owner decision pending) (context: docs/plan_context/smart_encoding_defect.md)
 - [ ] bg3 "faithful" collapse is not byte-exact: the 17,019,462-byte fixture collapses to 9,135,255 bytes that re-expand identically (pre-existing; recompression)
 - [ ] png expand silently drops bytes after the signature when no valid chunk follows (`\x89PNG\r\n\x1a\ntruncated` expands to zero chunks; pre-existing)
@@ -29,5 +29,4 @@ Completed items retire to `docs/PLAN_LOG.md`. Spec: `SPECIFICATION.md`.
 
 ## Recently completed
 - [x] Empty-string ambiguity accepted as a documented limitation, SPECIFICATION.md §8 (done 2026-02-10, 27d19cc)
-- [x] CLI bash tests (done 2026-02-02)
 - [x] Documentation (done 2026-02-02)
