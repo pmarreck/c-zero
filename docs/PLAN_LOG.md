@@ -18,3 +18,4 @@ Completed PLAN.md items retired by plan-retire, oldest retirement first.
 - [x] [Recently completed] C CLI (done 2026-02-02)
 - [x] [Recently completed] CLI bash tests (done 2026-02-02)
 - [x] [Recently completed] Documentation (done 2026-02-02)
+- [x] [Recently completed] Empty-string ambiguity accepted as a documented limitation, SPECIFICATION.md §8 (done 2026-02-10, 27d19cc)

@@ -22,6 +22,8 @@ annotate=[
 	tests/benchmark/run = performance-profile adapter command: execs the ReleaseFast c0-bench
 	tests/benchmark/test = Contract test for c0-bench: clean JSON, Debug refusal, malformed-argument rejection
 	tests/cli/test_codecs.sh = Codec plugin host tests with Bash fake plugins, plus conformance and round trips of the bundled plugins
+	tests/cli/test_windows_check.sh = Classifies tests/windows/check over wine presence and host settings with stub smoke scripts
+	tests/windows/check = Selects the Windows check for ./test: Wine smoke, else remote-smoke on $C0_WINDOWS_HOST, else fail
 	tests/windows/remote-smoke = On-demand real-Windows plugin-host smoke test over SSH (cmd.exe, paths with spaces, digests vs native)
 	tests/windows/smoke = Cross-builds for x86_64-windows and runs the plugin host under Wine against native outputs
 ]

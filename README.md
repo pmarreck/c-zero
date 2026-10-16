@@ -91,7 +91,7 @@ nix develop -c zig build -Doptimize=ReleaseFast
 
 ```bash
 # Run all tests: Zig unit tests, CLI and codec plugin tests, performance gates,
-# and a Windows smoke test of the plugin host under Wine
+# and a Windows smoke test of the plugin host (Wine, else $C0_WINDOWS_HOST)
 ./test
 
 # On demand: the same Windows checks on a real Windows machine reachable over SSH
@@ -99,7 +99,7 @@ nix develop -c zig build -Doptimize=ReleaseFast
 nix develop -c tests/windows/remote-smoke HOST
 ```
 
-`./test` reports the Wine check as not run, and fails, on machines without Wine.
+Without Wine, `./test` runs the real-Windows check against `$C0_WINDOWS_HOST` if it is set, and otherwise reports the Windows check as not run and fails.
 
 ## Architecture
 

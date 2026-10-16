@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Runs the Windows plugin-host check for ./test: the Wine smoke test when wine is installed,
+# otherwise the real-Windows smoke test against $C0_WINDOWS_HOST (an SSH destination), otherwise it
+# fails. A missing Windows check is never silently green.
+dir=${BASH_SOURCE[0]%/*}
+if command -v wine >/dev/null 2>&1; then
+	exec "$dir/smoke"
+elif [[ -n ${C0_WINDOWS_HOST:-} ]]; then
+	exec "$dir/remote-smoke" "$C0_WINDOWS_HOST"
+fi
+printf 'Windows smoke test NOT RUN: install wine, or set C0_WINDOWS_HOST to the SSH destination of a Windows machine\n' >&2
+exit 1

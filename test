@@ -74,11 +74,11 @@ if [[ -d tests/cli ]]; then
 	fi
 fi
 
-echo "=== Running benchmark adapter, performance gates and Windows smoke test (Wine) ==="
+echo "=== Running benchmark adapter, performance gates and Windows smoke test (Wine, else \$C0_WINDOWS_HOST) ==="
 export ZIG_GLOBAL_CACHE_DIR="$ZIG_CACHE"
 set +e
 # Performance gates run before the Wine smoke test so wineserver cannot compete for their CPUs.
-for gate in tests/benchmark/test ./cg ./mg tests/windows/smoke; do
+for gate in tests/benchmark/test ./cg ./mg tests/windows/check; do
 	# Gate verdicts go to stderr; the full JSON records are kept in the external history.
 	"$gate" >/dev/null
 	rc=$?
